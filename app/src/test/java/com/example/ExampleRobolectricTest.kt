@@ -30,6 +30,17 @@ class ExampleRobolectricTest {
         assertTrue(WordDictionary.isValidWord("HELLO"))
         assertTrue(WordDictionary.isValidWord("QI"))
         assertTrue(WordDictionary.isValidWord("ZEN"))
+        assertTrue(WordDictionary.isValidWord("SEX"))
+        assertTrue(WordDictionary.isValidWord("SEXY"))
+        assertTrue(WordDictionary.isValidWord("SEXES"))
+        assertTrue(WordDictionary.isValidWord("SEXED"))
+        assertTrue(WordDictionary.isValidWord("GENT"))
+        assertTrue(WordDictionary.isValidWord("GENTS"))
+        assertTrue(WordDictionary.isValidWord("GENTLE"))
+        assertTrue(WordDictionary.isValidWord("SCRABBLE"))
+        assertTrue(WordDictionary.hasPrefix("GEN"))
+        assertTrue(WordDictionary.hasPrefix("SEX"))
+        assertTrue(WordDictionary.hasPrefix("SCR"))
 
         val board = ScrabbleEngine.createEmptyBoard()
         val placements = listOf(

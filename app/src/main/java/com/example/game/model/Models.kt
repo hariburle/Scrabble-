@@ -199,16 +199,16 @@ enum class GameThemePalette(
         secondaryColor = Color(0xFFE29578),
         backgroundGradientTop = Color(0xFFF4F7F4),
         backgroundGradientBottom = Color(0xFFE5EDE6),
-        boardBackground = Color(0xFFD6E2D8),
-        cellBackground = Color(0xFFEAF0EB),
-        tileColor = Color(0xFFF9F6F0),
-        tileBorder = Color(0xFFD1C7B7),
-        tileTextColor = Color(0xFF2C3E2D),
-        twsColor = Color(0xFFE76F51),
-        dwsColor = Color(0xFFF4A261),
-        tlsColor = Color(0xFF457B9D),
-        dlsColor = Color(0xFFA8DADC),
-        centerColor = Color(0xFF2A9D8F)
+        boardBackground = Color(0xFFD3DFD5),
+        cellBackground = Color(0xFFEBF1EC),
+        tileColor = Color(0xFFFAF7F2),
+        tileBorder = Color(0xFFCEC3B1),
+        tileTextColor = Color(0xFF253526),
+        twsColor = Color(0xFFE59880),
+        dwsColor = Color(0xFFF2C299),
+        tlsColor = Color(0xFF90B4CE),
+        dlsColor = Color(0xFFC3DFE0),
+        centerColor = Color(0xFF81B29A)
     ),
     PASTEL_SUNSET(
         themeName = "Pastel Sunset",
@@ -218,16 +218,16 @@ enum class GameThemePalette(
         secondaryColor = Color(0xFFF78CA0),
         backgroundGradientTop = Color(0xFFFAF3F7),
         backgroundGradientBottom = Color(0xFFF3E7ED),
-        boardBackground = Color(0xFFEADBDF),
-        cellBackground = Color(0xFFFAF0F3),
+        boardBackground = Color(0xFFEAD8DE),
+        cellBackground = Color(0xFFFBF1F4),
         tileColor = Color(0xFFFFF9F5),
         tileBorder = Color(0xFFEAD2C6),
         tileTextColor = Color(0xFF4A3448),
-        twsColor = Color(0xFFE65C80),
-        dwsColor = Color(0xFFFF9AA2),
-        tlsColor = Color(0xFF7A68A6),
-        dlsColor = Color(0xFFB5EAEA),
-        centerColor = Color(0xFFE65C80)
+        twsColor = Color(0xFFEFA7B8),
+        dwsColor = Color(0xFFF8C6CB),
+        tlsColor = Color(0xFFB8A9D6),
+        dlsColor = Color(0xFFCCE8E8),
+        centerColor = Color(0xFFEFA7B8)
     ),
     NORDIC_SLATE(
         themeName = "Nordic Slate",
@@ -237,16 +237,16 @@ enum class GameThemePalette(
         secondaryColor = Color(0xFFE0A96D),
         backgroundGradientTop = Color(0xFFF0F4F6),
         backgroundGradientBottom = Color(0xFFDFE7EB),
-        boardBackground = Color(0xFFCBD6DC),
-        cellBackground = Color(0xFFE7EFF2),
+        boardBackground = Color(0xFFCAD4DA),
+        cellBackground = Color(0xFFE8EEF1),
         tileColor = Color(0xFFFAF8F5),
         tileBorder = Color(0xFFC7CBD1),
         tileTextColor = Color(0xFF1E2D33),
-        twsColor = Color(0xFFD9534F),
-        dwsColor = Color(0xFFF0AD4E),
-        tlsColor = Color(0xFF337AB7),
-        dlsColor = Color(0xFF5BC0DE),
-        centerColor = Color(0xFF385A64)
+        twsColor = Color(0xFFE59A96),
+        dwsColor = Color(0xFFF6CE98),
+        tlsColor = Color(0xFF8FAEC5),
+        dlsColor = Color(0xFFB8DCE5),
+        centerColor = Color(0xFF8FAEC5)
     ),
     WARM_WALNUT(
         themeName = "Warm Walnut",
@@ -256,16 +256,16 @@ enum class GameThemePalette(
         secondaryColor = Color(0xFFB85D19),
         backgroundGradientTop = Color(0xFFFAF7F2),
         backgroundGradientBottom = Color(0xFFEFE8DE),
-        boardBackground = Color(0xFFDFD4C4),
-        cellBackground = Color(0xFFF5EFE6),
+        boardBackground = Color(0xFFDDCFBD),
+        cellBackground = Color(0xFFF6F0E7),
         tileColor = Color(0xFFFFFDF9),
         tileBorder = Color(0xFFD6C5B3),
         tileTextColor = Color(0xFF3E2723),
-        twsColor = Color(0xFFC94A4A),
-        dwsColor = Color(0xFFDE824C),
-        tlsColor = Color(0xFF3B729E),
-        dlsColor = Color(0xFF7AA9C2),
-        centerColor = Color(0xFF5C3D2E)
+        twsColor = Color(0xFFDC9292),
+        dwsColor = Color(0xFFECC2A0),
+        tlsColor = Color(0xFF8CAFC4),
+        dlsColor = Color(0xFFBDD5DF),
+        centerColor = Color(0xFFB59379)
     ),
 
     // Dark Background Themes
@@ -282,11 +282,11 @@ enum class GameThemePalette(
         tileColor = Color(0xFF3A4354),
         tileBorder = Color(0xFF556276),
         tileTextColor = Color(0xFFF0F4F8),
-        twsColor = Color(0xFFEF5350),
-        dwsColor = Color(0xFFFF8A65),
-        tlsColor = Color(0xFF42A5F5),
-        dlsColor = Color(0xFF26C6DA),
-        centerColor = Color(0xFF66BB6A)
+        twsColor = Color(0xFF9E4747),
+        dwsColor = Color(0xFFA6644E),
+        tlsColor = Color(0xFF345F8A),
+        dlsColor = Color(0xFF2E6B75),
+        centerColor = Color(0xFF3E7543)
     ),
     DEEP_FOREST_DARK(
         themeName = "Deep Forest Dark",
@@ -301,11 +301,11 @@ enum class GameThemePalette(
         tileColor = Color(0xFF345443),
         tileBorder = Color(0xFF4E7B63),
         tileTextColor = Color(0xFFF1F8F4),
-        twsColor = Color(0xFFEF5350),
-        dwsColor = Color(0xFFFF8A65),
-        tlsColor = Color(0xFF42A5F5),
-        dlsColor = Color(0xFF26C6DA),
-        centerColor = Color(0xFF81C784)
+        twsColor = Color(0xFF9E4747),
+        dwsColor = Color(0xFFA6644E),
+        tlsColor = Color(0xFF345F8A),
+        dlsColor = Color(0xFF2E6B75),
+        centerColor = Color(0xFF3F6E4D)
     ),
     COZY_ESPRESSO_DARK(
         themeName = "Espresso Dark",
@@ -320,11 +320,11 @@ enum class GameThemePalette(
         tileColor = Color(0xFF523B30),
         tileBorder = Color(0xFF725445),
         tileTextColor = Color(0xFFFFF7ED),
-        twsColor = Color(0xFFEF5350),
-        dwsColor = Color(0xFFFFB74D),
-        tlsColor = Color(0xFF64B5F6),
-        dlsColor = Color(0xFF4DD0E1),
-        centerColor = Color(0xFFFFB74D)
+        twsColor = Color(0xFF9E4747),
+        dwsColor = Color(0xFFA6714E),
+        tlsColor = Color(0xFF3A6185),
+        dlsColor = Color(0xFF336C73),
+        centerColor = Color(0xFF8C5D38)
     ),
     AMETHYST_NIGHT(
         themeName = "Amethyst Night",
@@ -339,11 +339,11 @@ enum class GameThemePalette(
         tileColor = Color(0xFF4C3964),
         tileBorder = Color(0xFF6C528D),
         tileTextColor = Color(0xFFFAF5FF),
-        twsColor = Color(0xFFF06292),
-        dwsColor = Color(0xFFFF80AB),
-        tlsColor = Color(0xFF9575CD),
-        dlsColor = Color(0xFF80DEEA),
-        centerColor = Color(0xFFCE93D8)
+        twsColor = Color(0xFF964567),
+        dwsColor = Color(0xFFA85978),
+        tlsColor = Color(0xFF58487C),
+        dlsColor = Color(0xFF386872),
+        centerColor = Color(0xFF724F88)
     );
 
     companion object {

@@ -15,10 +15,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.res.painterResource
+import com.example.R
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.BarChart
-import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
@@ -58,7 +57,7 @@ fun ScoreHeader(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .padding(horizontal = 8.dp, vertical = 2.dp)
     ) {
         ScrabbleTopAppBar(
             remainingTilesCount = remainingTilesCount,
@@ -70,7 +69,7 @@ fun ScoreHeader(
             onRestartGame = onRestartGame
         )
 
-        Spacer(modifier = Modifier.height(4.dp))
+        Spacer(modifier = Modifier.height(2.dp))
 
         ScrabbleScoreCards(
             playerScore = playerScore,
@@ -142,7 +141,7 @@ fun ScrabbleTopAppBar(
                 modifier = Modifier.size(34.dp).testTag("theme_button")
             ) {
                 Icon(
-                    Icons.Default.Palette,
+                    painter = painterResource(R.drawable.ic_palette),
                     contentDescription = "Themes",
                     tint = palette.primaryColor,
                     modifier = Modifier.size(18.dp)
@@ -166,7 +165,7 @@ fun ScrabbleTopAppBar(
                 modifier = Modifier.size(34.dp).testTag("history_button")
             ) {
                 Icon(
-                    Icons.Default.History,
+                    painter = painterResource(R.drawable.ic_history),
                     contentDescription = "Move History",
                     tint = palette.primaryColor,
                     modifier = Modifier.size(18.dp)
@@ -178,7 +177,7 @@ fun ScrabbleTopAppBar(
                 modifier = Modifier.size(34.dp).testTag("stats_button")
             ) {
                 Icon(
-                    Icons.Default.BarChart,
+                    painter = painterResource(R.drawable.ic_bar_chart),
                     contentDescription = "Statistics",
                     tint = palette.primaryColor,
                     modifier = Modifier.size(18.dp)

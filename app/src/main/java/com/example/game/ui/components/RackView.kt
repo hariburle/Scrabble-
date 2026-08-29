@@ -22,16 +22,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.res.painterResource
+import com.example.R
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Lightbulb
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Shuffle
-import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -82,7 +77,7 @@ fun PlayerRackView(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 6.dp, vertical = 4.dp),
+            .padding(horizontal = 6.dp, vertical = 2.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         RackStatusPill(
@@ -94,7 +89,7 @@ fun PlayerRackView(
             palette = palette
         )
 
-        Spacer(modifier = Modifier.height(4.dp))
+        Spacer(modifier = Modifier.height(3.dp))
 
         RackTileTray(
             rack = rack,
@@ -104,7 +99,7 @@ fun PlayerRackView(
             onTileClick = onTileClick
         )
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(6.dp))
 
         RackActionButtons(
             rack = rack,
@@ -135,8 +130,7 @@ fun RackStatusPill(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(30.dp)
-            .padding(bottom = 2.dp),
+            .height(28.dp),
         contentAlignment = Alignment.Center
     ) {
         if (hasPendingPlacements && validationResult != null) {
@@ -145,21 +139,22 @@ fun RackStatusPill(
             val pts = validationResult.totalScore
 
             Surface(
-                shape = RoundedCornerShape(15.dp),
-                color = if (isValid) Color(0xFF1B5E20) else Color(0xFFC62828),
-                shadowElevation = 3.dp
+                shape = RoundedCornerShape(14.dp),
+                color = if (isValid) Color(0xFF1B5E20) else Color(0xFFB71C1C),
+                shadowElevation = 2.dp
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
                 ) {
                     Icon(
                         imageVector = if (isValid) Icons.Default.Check else Icons.Default.Info,
                         contentDescription = null,
                         tint = Color.White,
-                        modifier = Modifier.size(15.dp)
+                        modifier = Modifier.size(14.dp)
                     )
-                    Spacer(modifier = Modifier.width(6.dp))
+                    Spacer(modifier = Modifier.width(5.dp))
                     Text(
                         text = if (isValid) {
                             "Valid: $wordText (+$pts pts)" + (if (validationResult.isBingo) " ★ BINGO!" else "")
@@ -168,19 +163,20 @@ fun RackStatusPill(
                         },
                         color = Color.White,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 12.sp
+                        fontSize = 11.5.sp
                     )
                 }
             }
-        } else if (isAiThinking && statusMessage != null) {
+        } else if (isAiThinking || (statusMessage != null && isAiThinking)) {
             Surface(
-                shape = RoundedCornerShape(15.dp),
-                color = palette.secondaryColor.copy(alpha = 0.95f),
+                shape = RoundedCornerShape(14.dp),
+                color = palette.secondaryColor,
                 shadowElevation = 2.dp
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
                 ) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(12.dp),
@@ -189,20 +185,67 @@ fun RackStatusPill(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = statusMessage,
+                        text = statusMessage ?: "AI is thinking...",
                         color = Color.White,
-                        fontSize = 12.sp,
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+        } else if (statusMessage != null) {
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = palette.cellBackground,
+                border = androidx.compose.foundation.BorderStroke(1.dp, palette.primaryColor.copy(alpha = 0.35f)),
+                shadowElevation = 1.dp
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .background(palette.primaryColor, CircleShape)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = statusMessage,
+                        color = palette.primaryColor,
+                        fontSize = 11.5.sp,
                         fontWeight = FontWeight.SemiBold
                     )
                 }
             }
         } else {
-            Text(
-                text = if (isPlayerTurn) "Tap a tile then tap a board square" else (statusMessage ?: "Opponent's turn..."),
-                color = palette.tileTextColor.copy(alpha = 0.7f),
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium
-            )
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = palette.cellBackground.copy(alpha = 0.75f),
+                border = androidx.compose.foundation.BorderStroke(0.8.dp, palette.tileBorder.copy(alpha = 0.4f))
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .background(
+                                if (isPlayerTurn) Color(0xFF2E7D32) else palette.tileTextColor.copy(alpha = 0.4f),
+                                CircleShape
+                            )
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (isPlayerTurn) "Your Turn • Place tiles on the board" else "Opponent's turn...",
+                        color = palette.tileTextColor.copy(alpha = 0.85f),
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
         }
     }
 }
@@ -310,7 +353,7 @@ fun RackActionButtons(
                 .testTag("shuffle_button")
         ) {
             Icon(
-                imageVector = Icons.Default.Shuffle,
+                painter = painterResource(R.drawable.ic_shuffle),
                 contentDescription = "Shuffle Rack",
                 tint = if (isPlayerTurn && rack.isNotEmpty()) palette.primaryColor else palette.primaryColor.copy(alpha = 0.35f),
                 modifier = Modifier.size(22.dp)
@@ -329,7 +372,7 @@ fun RackActionButtons(
                 .testTag("recall_button")
         ) {
             Icon(
-                imageVector = Icons.AutoMirrored.Filled.Undo,
+                painter = painterResource(R.drawable.ic_undo),
                 contentDescription = "Recall Placed Tiles",
                 tint = if (hasPendingPlacements) palette.secondaryColor else palette.primaryColor.copy(alpha = 0.3f),
                 modifier = Modifier.size(22.dp)
@@ -348,7 +391,7 @@ fun RackActionButtons(
                 .testTag("swap_button")
         ) {
             Icon(
-                imageVector = Icons.Default.SwapHoriz,
+                painter = painterResource(R.drawable.ic_swap_horiz),
                 contentDescription = "Exchange Tiles",
                 tint = if (isPlayerTurn && rack.isNotEmpty() && !hasPendingPlacements) palette.primaryColor else palette.primaryColor.copy(alpha = 0.3f),
                 modifier = Modifier.size(22.dp)
@@ -367,7 +410,7 @@ fun RackActionButtons(
                 .testTag("hint_button")
         ) {
             Icon(
-                imageVector = Icons.Default.Lightbulb,
+                painter = painterResource(R.drawable.ic_lightbulb),
                 contentDescription = "Get Hint",
                 tint = if (isPlayerTurn && !hasPendingPlacements) Color(0xFFE65100) else Color(0xFFE65100).copy(alpha = 0.35f),
                 modifier = Modifier.size(22.dp)
@@ -401,7 +444,7 @@ fun RackActionButtons(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
-                    imageVector = Icons.AutoMirrored.Filled.Send,
+                    painter = painterResource(R.drawable.ic_send),
                     contentDescription = null,
                     tint = if (isPlayEnabled) Color.White else palette.tileTextColor.copy(alpha = 0.35f),
                     modifier = Modifier.size(17.dp)

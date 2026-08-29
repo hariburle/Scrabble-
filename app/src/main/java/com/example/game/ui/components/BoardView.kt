@@ -20,10 +20,8 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.CropFree
-import androidx.compose.material.icons.filled.Remove
+import androidx.compose.ui.res.painterResource
+import com.example.R
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -90,17 +88,20 @@ fun ScrabbleBoardView(
         Box(
             modifier = Modifier
                 .size(boardDimension)
-                .shadow(6.dp, RoundedCornerShape(12.dp))
-                .clip(RoundedCornerShape(12.dp))
+                .shadow(4.dp, RoundedCornerShape(10.dp))
+                .clip(RoundedCornerShape(10.dp))
                 .background(palette.boardBackground)
-                .border(2.dp, palette.primaryColor.copy(alpha = 0.25f), RoundedCornerShape(12.dp))
+                .border(1.5.dp, palette.primaryColor.copy(alpha = 0.2f), RoundedCornerShape(10.dp))
                 .pointerInput(Unit) {
                     detectTransformGestures { _, pan, zoom, _ ->
-                        scale = (scale * zoom).coerceIn(1.0f, 2.5f)
-                        if (scale == 1.0f) {
+                        scale = (scale * zoom).coerceIn(1.0f, 3.0f)
+                        if (scale <= 1.01f) {
+                            scale = 1.0f
                             offset = Offset.Zero
                         } else {
-                            val maxPan = 300f * (scale - 1f)
+                            // Generous pan limit giving full 100% view of top/bottom/left/right border cells with margin
+                            val boardPx = size.width.toFloat()
+                            val maxPan = (boardPx * (scale - 1f)) / 2f + (36f * (scale - 1f))
                             offset = Offset(
                                 x = (offset.x + pan.x).coerceIn(-maxPan, maxPan),
                                 y = (offset.y + pan.y).coerceIn(-maxPan, maxPan)
@@ -162,9 +163,9 @@ fun ScrabbleBoardView(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(6.dp)
-                    .shadow(4.dp, RoundedCornerShape(20.dp)),
+                    .shadow(3.dp, RoundedCornerShape(20.dp)),
                 shape = RoundedCornerShape(20.dp),
-                color = palette.cellBackground.copy(alpha = 0.92f)
+                color = palette.cellBackground.copy(alpha = 0.88f)
             ) {
                 Row(
                     modifier = Modifier.padding(2.dp),
@@ -172,12 +173,12 @@ fun ScrabbleBoardView(
                 ) {
                     IconButton(
                         onClick = {
-                            scale = (scale + 0.35f).coerceAtMost(2.5f)
+                            scale = (scale + 0.4f).coerceAtMost(3.0f)
                         },
-                        modifier = Modifier.size(34.dp),
+                        modifier = Modifier.size(32.dp),
                         colors = IconButtonDefaults.iconButtonColors(contentColor = palette.primaryColor)
                     ) {
-                        Icon(Icons.Default.Add, contentDescription = "Zoom In", modifier = Modifier.size(17.dp))
+                        Icon(painter = painterResource(R.drawable.ic_add), contentDescription = "Zoom In", modifier = Modifier.size(16.dp))
                     }
 
                     IconButton(
@@ -185,21 +186,24 @@ fun ScrabbleBoardView(
                             scale = 1.0f
                             offset = Offset.Zero
                         },
-                        modifier = Modifier.size(34.dp),
+                        modifier = Modifier.size(32.dp),
                         colors = IconButtonDefaults.iconButtonColors(contentColor = palette.primaryColor)
                     ) {
-                        Icon(Icons.Default.CropFree, contentDescription = "Reset Zoom", modifier = Modifier.size(17.dp))
+                        Icon(painter = painterResource(R.drawable.ic_crop_free), contentDescription = "Reset Zoom", modifier = Modifier.size(16.dp))
                     }
 
                     IconButton(
                         onClick = {
-                            scale = (scale - 0.35f).coerceAtLeast(1.0f)
-                            if (scale == 1.0f) offset = Offset.Zero
+                            scale = (scale - 0.4f).coerceAtLeast(1.0f)
+                            if (scale <= 1.01f) {
+                                scale = 1.0f
+                                offset = Offset.Zero
+                            }
                         },
-                        modifier = Modifier.size(34.dp),
+                        modifier = Modifier.size(32.dp),
                         colors = IconButtonDefaults.iconButtonColors(contentColor = palette.primaryColor)
                     ) {
-                        Icon(Icons.Default.Remove, contentDescription = "Zoom Out", modifier = Modifier.size(17.dp))
+                        Icon(painter = painterResource(R.drawable.ic_remove), contentDescription = "Zoom Out", modifier = Modifier.size(16.dp))
                     }
                 }
             }
@@ -232,15 +236,15 @@ fun BoardCellView(
     Box(
         modifier = modifier
             .aspectRatio(1f)
-            .padding(1.dp)
-            .clip(RoundedCornerShape(3.dp))
+            .padding(0.75.dp)
+            .clip(RoundedCornerShape(2.5.dp))
             .background(bgBonusColor)
             .border(
                 width = if (isSelected) 2.dp else if (isLastMove) 1.5.dp else 0.5.dp,
                 color = if (isSelected) palette.secondaryColor
                 else if (isLastMove) palette.secondaryColor.copy(alpha = glowAlpha)
-                else palette.tileBorder.copy(alpha = 0.4f),
-                shape = RoundedCornerShape(3.dp)
+                else palette.tileBorder.copy(alpha = 0.25f),
+                shape = RoundedCornerShape(2.5.dp)
             )
             .clickable(onClick = onClick)
             .testTag("cell_${cell.row}_${cell.col}"),
@@ -250,20 +254,21 @@ fun BoardCellView(
             ScrabbleTileView(
                 tile = tile,
                 palette = palette,
-                size = cellSize - 2.dp,
+                size = cellSize - 1.5.dp,
                 isSelected = isSelected,
                 isPending = isPending,
                 isLastMove = isLastMove
             )
         } else {
-            // Display multiplier text
+            // Display multiplier text with gentle, muted contrast that never overpowers the board
             if (cell.bonusType != BonusType.NONE) {
                 Text(
                     text = cell.bonusType.shortLabel,
-                    color = Color.White,
-                    fontSize = (cellSize.value * 0.32f).coerceIn(7f, 13f).sp,
-                    fontWeight = FontWeight.Black,
-                    textAlign = TextAlign.Center
+                    color = if (palette.isDark) Color.White.copy(alpha = 0.78f) else Color(0xFF334E68).copy(alpha = 0.70f),
+                    fontSize = (cellSize.value * 0.27f).coerceIn(6f, 10f).sp,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center,
+                    lineHeight = (cellSize.value * 0.28f).coerceIn(6.5f, 11f).sp
                 )
             }
         }

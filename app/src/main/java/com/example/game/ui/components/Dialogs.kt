@@ -24,14 +24,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.res.painterResource
+import com.example.R
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -889,7 +888,7 @@ fun WordDefinitionDialog(
         onDismissRequest = onDismiss,
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = palette.secondaryColor)
+                Icon(painter = painterResource(R.drawable.ic_auto_awesome), contentDescription = null, tint = palette.secondaryColor)
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = word.uppercase(),
@@ -1065,7 +1064,7 @@ fun GameStatsDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.EmojiEvents, contentDescription = null, tint = palette.secondaryColor)
+                        Icon(painter = painterResource(R.drawable.ic_emoji_events), contentDescription = null, tint = palette.secondaryColor)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = "Game Statistics",

@@ -92,16 +92,8 @@ fun ScrabbleScreen(
         }
     }
 
-    val snackbarHostState = remember { SnackbarHostState() }
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-
-    LaunchedEffect(state.messageToast) {
-        state.messageToast?.let { msg ->
-            snackbarHostState.showSnackbar(msg)
-            viewModel.clearToast()
-        }
-    }
 
     Box(
         modifier = modifier
@@ -254,7 +246,7 @@ fun ScrabbleScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f)
-                        .padding(horizontal = 8.dp, vertical = 2.dp),
+                        .padding(horizontal = 4.dp, vertical = 2.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     ScrabbleBoardView(
@@ -284,28 +276,6 @@ fun ScrabbleScreen(
                     onPlayMove = { viewModel.onPlayMove() },
                     onHint = { viewModel.onGetHint() },
                     onPass = { viewModel.onPassTurn() }
-                )
-            }
-        }
-
-        // Floating Toast / Snackbar Host
-        SnackbarHost(
-            hostState = snackbarHostState,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = if (isLandscape) 16.dp else 80.dp)
-        ) { snackbarData ->
-            Surface(
-                shape = RoundedCornerShape(20.dp),
-                color = palette.primaryColor,
-                shadowElevation = 6.dp
-            ) {
-                Text(
-                    text = snackbarData.visuals.message,
-                    color = Color.White,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 13.sp,
-                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp)
                 )
             }
         }
