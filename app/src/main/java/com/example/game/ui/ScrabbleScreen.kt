@@ -173,7 +173,11 @@ fun ScrabbleScreen(
                             isPlayerTurn = state.isPlayerTurn,
                             isAiThinking = state.isAiThinking,
                             difficulty = state.difficulty,
-                            palette = palette
+                            palette = palette,
+                            peeksLeft = state.peeksLeft,
+                            isPeeking = state.isPeeking,
+                            aiRack = state.aiRack,
+                            onPeekClick = { viewModel.onPeekOpponent() }
                         )
 
                         Spacer(modifier = Modifier.height(3.dp))
@@ -210,6 +214,8 @@ fun ScrabbleScreen(
                             isPlayerTurn = state.isPlayerTurn && !state.isAiThinking,
                             validationResult = state.validationResult,
                             palette = palette,
+                            hintsLeft = state.hintsLeft,
+                            swapsLeft = state.swapsLeft,
                             onShuffle = { viewModel.onShuffleRack() },
                             onRecall = { viewModel.onRecallAll() },
                             onSwap = { viewModel.setDialogVisible(swap = true) },
@@ -234,12 +240,33 @@ fun ScrabbleScreen(
                     difficulty = state.difficulty,
                     remainingTilesCount = state.tileBagCount,
                     palette = palette,
+                    peeksLeft = state.peeksLeft,
+                    isPeeking = state.isPeeking,
+                    aiRack = state.aiRack,
+                    onPeekClick = { viewModel.onPeekOpponent() },
                     onOpenSettings = { viewModel.setDialogVisible(settings = true) },
                     onOpenThemes = { viewModel.setDialogVisible(theme = true) },
                     onOpenHistory = { viewModel.setDialogVisible(history = true) },
                     onOpenStats = { viewModel.setDialogVisible(stats = true) },
                     onRestartGame = { viewModel.startNewGame() }
                 )
+
+                // Elegant Status Pill utilizing the vertical whitespace between scores and board
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    RackStatusPill(
+                        validationResult = state.validationResult,
+                        hasPendingPlacements = state.pendingPlacements.isNotEmpty(),
+                        isPlayerTurn = state.isPlayerTurn && !state.isAiThinking,
+                        isAiThinking = state.isAiThinking,
+                        statusMessage = state.messageToast,
+                        palette = palette
+                    )
+                }
 
                 // Scrabble 15x15 Interactive Board (Takes available middle space)
                 Box(
@@ -266,6 +293,8 @@ fun ScrabbleScreen(
                     validationResult = state.validationResult,
                     hasPendingPlacements = state.pendingPlacements.isNotEmpty(),
                     isPlayerTurn = state.isPlayerTurn && !state.isAiThinking,
+                    hintsLeft = state.hintsLeft,
+                    swapsLeft = state.swapsLeft,
                     isAiThinking = state.isAiThinking,
                     statusMessage = state.messageToast,
                     palette = palette,

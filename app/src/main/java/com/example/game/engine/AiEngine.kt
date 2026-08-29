@@ -115,8 +115,11 @@ object AiEngine {
 
         anchors.shuffle()
 
-        // Sample dictionary words to test on anchors
-        val wordSample = WordDictionary.allWordsList.shuffled().take(400)
+        // Pre-filter words that can actually be formed with this rack (plus some board letters)
+        val possibleWords = WordDictionary.allWordsList.filter {
+            isWordPossibleWithRack(it, rackLetters, maxNeededFromBoard = 3)
+        }
+        val wordSample = possibleWords.shuffled().take(400)
 
         for ((ar, ac) in anchors) {
             if (candidates.size >= limit * 2) break
@@ -164,12 +167,64 @@ object AiEngine {
         }.take(limit)
     }
 
+    private fun isWordPossibleWithRack(
+        word: String,
+        rackLetters: List<Char>,
+        maxNeededFromBoard: Int
+    ): Boolean {
+        if (word.length < 2 || word.length > 8) return false
+
+        val rackCounts = IntArray(26)
+        var blanks = 0
+        for (c in rackLetters) {
+            if (c == ' ' || c == '?') {
+                blanks++
+            } else {
+                val idx = c.uppercaseChar() - 'A'
+                if (idx in 0..25) {
+                    rackCounts[idx]++
+                }
+            }
+        }
+
+        var neededFromBoard = 0
+        val neededCharCounts = IntArray(26)
+        for (i in word.indices) {
+            val c = word[i].uppercaseChar()
+            val idx = c - 'A'
+            if (idx in 0..25) {
+                neededCharCounts[idx]++
+            } else {
+                neededFromBoard++
+            }
+        }
+
+        var usedBlanks = 0
+        for (i in 0..25) {
+            val diff = neededCharCounts[i] - rackCounts[i]
+            if (diff > 0) {
+                val blankContribution = minOf(diff, blanks - usedBlanks)
+                usedBlanks += blankContribution
+                neededFromBoard += (diff - blankContribution)
+            }
+        }
+
+        if (neededFromBoard > maxNeededFromBoard) return false
+
+        val usedFromRack = word.length - neededFromBoard
+        return usedFromRack >= 1
+    }
+
     private fun generateFirstMoves(
         board: Array<Array<BoardCell>>,
         rack: List<Tile>,
         results: MutableList<AiCandidateMove>
     ) {
-        val sampleWords = WordDictionary.allWordsList.shuffled().take(600)
+        val rackLetters = rack.map { if (it.isBlank) ' ' else it.letter }
+        val possibleWords = WordDictionary.allWordsList.filter {
+            isWordPossibleWithRack(it, rackLetters, maxNeededFromBoard = 0)
+        }
+        val sampleWords = possibleWords.shuffled().take(600)
         val center = ScrabbleEngine.CENTER_ROW
 
         for (word in sampleWords) {

@@ -28,6 +28,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
@@ -37,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.game.model.Difficulty
 import com.example.game.model.GameThemePalette
+import com.example.game.model.Tile
 
 @Composable
 fun ScoreHeader(
@@ -47,6 +49,10 @@ fun ScoreHeader(
     difficulty: Difficulty,
     remainingTilesCount: Int,
     palette: GameThemePalette,
+    peeksLeft: Int,
+    isPeeking: Boolean,
+    aiRack: List<Tile>,
+    onPeekClick: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenThemes: () -> Unit,
     onOpenHistory: () -> Unit,
@@ -77,7 +83,11 @@ fun ScoreHeader(
             isPlayerTurn = isPlayerTurn,
             isAiThinking = isAiThinking,
             difficulty = difficulty,
-            palette = palette
+            palette = palette,
+            peeksLeft = peeksLeft,
+            isPeeking = isPeeking,
+            aiRack = aiRack,
+            onPeekClick = onPeekClick
         )
     }
 }
@@ -207,6 +217,10 @@ fun ScrabbleScoreCards(
     isAiThinking: Boolean,
     difficulty: Difficulty,
     palette: GameThemePalette,
+    peeksLeft: Int,
+    isPeeking: Boolean,
+    aiRack: List<Tile>,
+    onPeekClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -281,12 +295,16 @@ fun ScrabbleScoreCards(
         Surface(
             modifier = Modifier
                 .weight(1f)
-                .shadow(if (!isPlayerTurn) 3.dp else 1.dp, RoundedCornerShape(12.dp)),
+                .shadow(if (!isPlayerTurn) 3.dp else 1.dp, RoundedCornerShape(12.dp))
+                .clickable(
+                    enabled = isPlayerTurn && peeksLeft > 0 && !isPeeking,
+                    onClick = onPeekClick
+                ),
             shape = RoundedCornerShape(12.dp),
-            color = if (!isPlayerTurn) palette.cellBackground else palette.cellBackground.copy(alpha = 0.7f),
+            color = if (isPeeking) palette.secondaryColor.copy(alpha = 0.15f) else if (!isPlayerTurn) palette.cellBackground else palette.cellBackground.copy(alpha = 0.7f),
             border = androidx.compose.foundation.BorderStroke(
-                width = if (!isPlayerTurn) 2.dp else 1.dp,
-                color = if (!isPlayerTurn) palette.secondaryColor else palette.tileBorder.copy(alpha = 0.5f)
+                width = if (isPeeking) 2.dp else if (!isPlayerTurn) 2.dp else 1.dp,
+                color = if (isPeeking) Color(0xFFE65100) else if (!isPlayerTurn) palette.secondaryColor else palette.tileBorder.copy(alpha = 0.5f)
             )
         ) {
             Row(
@@ -322,8 +340,35 @@ fun ScrabbleScoreCards(
                                         .background(palette.secondaryColor, CircleShape)
                                 )
                             }
+                            Spacer(modifier = Modifier.weight(1f))
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .padding(start = 4.dp, end = 2.dp)
+                                    .alpha(if (peeksLeft > 0) 1.0f else 0.4f)
+                            ) {
+                                Text(
+                                    text = "👁️",
+                                    fontSize = 10.sp
+                                )
+                                Spacer(modifier = Modifier.width(1.dp))
+                                Text(
+                                    text = "$peeksLeft",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = palette.tileTextColor.copy(alpha = 0.8f)
+                                )
+                            }
                         }
-                        if (isAiThinking) {
+                        if (isPeeking) {
+                            Text(
+                                text = aiRack.joinToString(" ") { it.letter.toString() },
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Black,
+                                letterSpacing = 2.sp,
+                                color = Color(0xFFE65100)
+                            )
+                        } else if (isAiThinking) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(8.dp),
@@ -340,7 +385,7 @@ fun ScrabbleScoreCards(
                             }
                         } else {
                             Text(
-                                text = if (!isPlayerTurn) "Bot's Turn" else "Waiting...",
+                                text = if (!isPlayerTurn) "Bot's Turn" else "Tap to peek",
                                 fontSize = 9.sp,
                                 fontWeight = if (!isPlayerTurn) FontWeight.SemiBold else FontWeight.Normal,
                                 color = if (!isPlayerTurn) palette.secondaryColor else palette.tileTextColor.copy(alpha = 0.6f)

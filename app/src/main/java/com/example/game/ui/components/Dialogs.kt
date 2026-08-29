@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -764,6 +765,8 @@ fun MoveHistoryDialog(
     onWordClick: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
+    var showChart by remember { mutableStateOf(false) }
+
     Dialog(onDismissRequest = onDismiss) {
         Surface(
             shape = RoundedCornerShape(20.dp),
@@ -789,12 +792,62 @@ fun MoveHistoryDialog(
                     }
                 }
 
+                // Sleek Segmented Switch Tab Header
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp)
+                        .background(palette.tileColor.copy(alpha = 0.25f), RoundedCornerShape(10.dp))
+                        .padding(3.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    // List Log Tab Button
+                    Surface(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { showChart = false },
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (!showChart) palette.primaryColor else Color.Transparent
+                    ) {
+                        Text(
+                            text = "📜 Turn Log",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            color = if (!showChart) Color.White else palette.tileTextColor.copy(alpha = 0.8f),
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(vertical = 6.dp)
+                        )
+                    }
+
+                    // Chart Progression Tab Button
+                    Surface(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { showChart = true },
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (showChart) palette.primaryColor else Color.Transparent
+                    ) {
+                        Text(
+                            text = "📊 Score Chart",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            color = if (showChart) Color.White else palette.tileTextColor.copy(alpha = 0.8f),
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(vertical = 6.dp)
+                        )
+                    }
+                }
+
                 if (logs.isEmpty()) {
                     Box(
                         modifier = Modifier.fillMaxWidth().weight(1f),
                         contentAlignment = Alignment.Center
                     ) {
                         Text("No moves played yet. Make your first play!", color = palette.tileTextColor.copy(alpha = 0.6f))
+                    }
+                } else if (showChart) {
+                    Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
+                        ScoreProgressionChart(logs = logs, palette = palette)
                     }
                 } else {
                     LazyColumn(
@@ -1111,5 +1164,174 @@ private fun StatRow(title: String, value: String, palette: GameThemePalette) {
     ) {
         Text(text = title, fontSize = 13.sp, color = palette.tileTextColor.copy(alpha = 0.8f))
         Text(text = value, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = palette.primaryColor)
+    }
+}
+
+@Composable
+fun ScoreProgressionChart(
+    logs: List<GameLogEntry>,
+    palette: GameThemePalette
+) {
+    // Reconstruct chronological score progression
+    val chronological = logs.reversed()
+    data class TurnScore(val turnIndex: Int, val playerSum: Int, val aiSum: Int)
+    
+    val pointsList = mutableListOf<TurnScore>()
+    var pSum = 0
+    var aSum = 0
+    var turnCounter = 1
+    
+    for (entry in chronological) {
+        if (entry.isPlayer) {
+            pSum += entry.points
+        } else {
+            aSum += entry.points
+        }
+        pointsList.add(TurnScore(turnCounter++, pSum, aSum))
+    }
+
+    if (pointsList.isEmpty()) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "No score progression data available yet.",
+                color = palette.tileTextColor.copy(alpha = 0.5f),
+                fontSize = 13.sp
+            )
+        }
+        return
+    }
+
+    val maxScore = maxOf(pSum, aSum, 10).toFloat()
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(8.dp)
+    ) {
+        // Legend
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 12.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(12.dp)
+                        .background(palette.primaryColor, RoundedCornerShape(2.dp))
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Player", fontSize = 11.sp, color = palette.tileTextColor, fontWeight = FontWeight.Medium)
+            }
+            Spacer(modifier = Modifier.width(16.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(12.dp)
+                        .background(palette.secondaryColor, RoundedCornerShape(2.dp))
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Computer", fontSize = 11.sp, color = palette.tileTextColor, fontWeight = FontWeight.Medium)
+            }
+        }
+
+        // Horizontal scrollable Container
+        androidx.compose.foundation.lazy.LazyRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .background(palette.tileColor.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
+                .border(1.dp, palette.tileBorder.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.Bottom
+        ) {
+            items(pointsList) { turn ->
+                val playerBarHeightRatio = turn.playerSum / maxScore
+                val aiBarHeightRatio = turn.aiSum / maxScore
+
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.width(52.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .height(180.dp)
+                            .fillMaxWidth(),
+                        contentAlignment = Alignment.BottomCenter
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceEvenly,
+                            verticalAlignment = Alignment.Bottom
+                        ) {
+                            // Player Bar
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Bottom,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(
+                                    text = "${turn.playerSum}",
+                                    fontSize = 8.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = palette.primaryColor,
+                                    modifier = Modifier.padding(bottom = 2.dp)
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height((160 * playerBarHeightRatio).dp)
+                                        .background(
+                                            palette.primaryColor,
+                                            RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp)
+                                        )
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(4.dp))
+
+                            // AI Bar
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Bottom,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(
+                                    text = "${turn.aiSum}",
+                                    fontSize = 8.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = palette.secondaryColor,
+                                    modifier = Modifier.padding(bottom = 2.dp)
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height((160 * aiBarHeightRatio).dp)
+                                        .background(
+                                            palette.secondaryColor,
+                                            RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp)
+                                        )
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    Text(
+                        text = "Turn ${turn.turnIndex}",
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = palette.tileTextColor.copy(alpha = 0.7f)
+                    )
+                }
+            }
+        }
     }
 }

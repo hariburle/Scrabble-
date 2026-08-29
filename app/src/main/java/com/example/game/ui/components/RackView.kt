@@ -10,6 +10,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -62,6 +64,8 @@ fun PlayerRackView(
     validationResult: MoveScoreResult?,
     hasPendingPlacements: Boolean,
     isPlayerTurn: Boolean,
+    hintsLeft: Int,
+    swapsLeft: Int,
     isAiThinking: Boolean = false,
     statusMessage: String? = null,
     palette: GameThemePalette,
@@ -80,17 +84,6 @@ fun PlayerRackView(
             .padding(horizontal = 6.dp, vertical = 2.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        RackStatusPill(
-            validationResult = validationResult,
-            hasPendingPlacements = hasPendingPlacements,
-            isPlayerTurn = isPlayerTurn,
-            isAiThinking = isAiThinking,
-            statusMessage = statusMessage,
-            palette = palette
-        )
-
-        Spacer(modifier = Modifier.height(3.dp))
-
         RackTileTray(
             rack = rack,
             selectedTileIndex = selectedTileIndex,
@@ -107,6 +100,8 @@ fun PlayerRackView(
             isPlayerTurn = isPlayerTurn,
             validationResult = validationResult,
             palette = palette,
+            hintsLeft = hintsLeft,
+            swapsLeft = swapsLeft,
             onShuffle = onShuffle,
             onRecall = onRecall,
             onSwap = onSwap,
@@ -129,8 +124,7 @@ fun RackStatusPill(
 ) {
     Box(
         modifier = modifier
-            .fillMaxWidth()
-            .height(28.dp),
+            .padding(horizontal = 16.dp, vertical = 2.dp),
         contentAlignment = Alignment.Center
     ) {
         if (hasPendingPlacements && validationResult != null) {
@@ -139,12 +133,12 @@ fun RackStatusPill(
             val pts = validationResult.totalScore
 
             Surface(
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(16.dp),
                 color = if (isValid) Color(0xFF1B5E20) else Color(0xFFB71C1C),
                 shadowElevation = 2.dp
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center
                 ) {
@@ -154,7 +148,7 @@ fun RackStatusPill(
                         tint = Color.White,
                         modifier = Modifier.size(14.dp)
                     )
-                    Spacer(modifier = Modifier.width(5.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = if (isValid) {
                             "Valid: $wordText (+$pts pts)" + (if (validationResult.isBingo) " ★ BINGO!" else "")
@@ -163,18 +157,21 @@ fun RackStatusPill(
                         },
                         color = Color.White,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 11.5.sp
+                        fontSize = 12.sp,
+                        style = androidx.compose.ui.text.TextStyle(
+                            platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false)
+                        )
                     )
                 }
             }
         } else if (isAiThinking || (statusMessage != null && isAiThinking)) {
             Surface(
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(16.dp),
                 color = palette.secondaryColor,
                 shadowElevation = 2.dp
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center
                 ) {
@@ -187,20 +184,23 @@ fun RackStatusPill(
                     Text(
                         text = statusMessage ?: "AI is thinking...",
                         color = Color.White,
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.SemiBold
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        style = androidx.compose.ui.text.TextStyle(
+                            platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false)
+                        )
                     )
                 }
             }
         } else if (statusMessage != null) {
             Surface(
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(16.dp),
                 color = palette.cellBackground,
                 border = androidx.compose.foundation.BorderStroke(1.dp, palette.primaryColor.copy(alpha = 0.35f)),
                 shadowElevation = 1.dp
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center
                 ) {
@@ -213,19 +213,22 @@ fun RackStatusPill(
                     Text(
                         text = statusMessage,
                         color = palette.primaryColor,
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.SemiBold
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        style = androidx.compose.ui.text.TextStyle(
+                            platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false)
+                        )
                     )
                 }
             }
         } else {
             Surface(
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(16.dp),
                 color = palette.cellBackground.copy(alpha = 0.75f),
                 border = androidx.compose.foundation.BorderStroke(0.8.dp, palette.tileBorder.copy(alpha = 0.4f))
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center
                 ) {
@@ -241,8 +244,11 @@ fun RackStatusPill(
                     Text(
                         text = if (isPlayerTurn) "Your Turn • Place tiles on the board" else "Opponent's turn...",
                         color = palette.tileTextColor.copy(alpha = 0.85f),
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.Medium
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        style = androidx.compose.ui.text.TextStyle(
+                            platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false)
+                        )
                     )
                 }
             }
@@ -326,6 +332,8 @@ fun RackActionButtons(
     isPlayerTurn: Boolean,
     validationResult: MoveScoreResult?,
     palette: GameThemePalette,
+    hintsLeft: Int,
+    swapsLeft: Int,
     onShuffle: () -> Unit,
     onRecall: () -> Unit,
     onSwap: () -> Unit,
@@ -380,41 +388,85 @@ fun RackActionButtons(
         }
 
         // Swap
-        IconButton(
-            onClick = onSwap,
-            enabled = isPlayerTurn && rack.isNotEmpty() && !hasPendingPlacements,
-            modifier = Modifier
-                .size(46.dp)
-                .shadow(3.dp, CircleShape)
-                .background(palette.cellBackground, CircleShape)
-                .border(1.dp, palette.tileBorder.copy(alpha = 0.6f), CircleShape)
-                .testTag("swap_button")
-        ) {
-            Icon(
-                painter = painterResource(R.drawable.ic_swap_horiz),
-                contentDescription = "Exchange Tiles",
-                tint = if (isPlayerTurn && rack.isNotEmpty() && !hasPendingPlacements) palette.primaryColor else palette.primaryColor.copy(alpha = 0.3f),
-                modifier = Modifier.size(22.dp)
-            )
+        Box(contentAlignment = Alignment.Center) {
+            IconButton(
+                onClick = onSwap,
+                enabled = isPlayerTurn && rack.isNotEmpty() && !hasPendingPlacements && swapsLeft > 0,
+                modifier = Modifier
+                    .size(46.dp)
+                    .shadow(3.dp, CircleShape)
+                    .background(palette.cellBackground, CircleShape)
+                    .border(1.dp, palette.tileBorder.copy(alpha = 0.6f), CircleShape)
+                    .testTag("swap_button")
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_swap_horiz),
+                    contentDescription = "Exchange Tiles",
+                    tint = if (isPlayerTurn && rack.isNotEmpty() && !hasPendingPlacements && swapsLeft > 0) palette.primaryColor else palette.primaryColor.copy(alpha = 0.3f),
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+            // Swap count badge
+            Box(
+                modifier = Modifier
+                    .size(15.dp)
+                    .align(Alignment.TopEnd)
+                    .offset(x = 1.dp, y = (-1).dp)
+                    .background(palette.primaryColor, CircleShape)
+                    .border(0.8.dp, Color.White, CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "$swapsLeft",
+                    color = Color.White,
+                    fontSize = 8.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    style = androidx.compose.ui.text.TextStyle(
+                        platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false)
+                    )
+                )
+            }
         }
 
         // Hint
-        IconButton(
-            onClick = onHint,
-            enabled = isPlayerTurn && !hasPendingPlacements,
-            modifier = Modifier
-                .size(46.dp)
-                .shadow(3.dp, CircleShape)
-                .background(palette.cellBackground, CircleShape)
-                .border(1.dp, palette.tileBorder.copy(alpha = 0.6f), CircleShape)
-                .testTag("hint_button")
-        ) {
-            Icon(
-                painter = painterResource(R.drawable.ic_lightbulb),
-                contentDescription = "Get Hint",
-                tint = if (isPlayerTurn && !hasPendingPlacements) Color(0xFFE65100) else Color(0xFFE65100).copy(alpha = 0.35f),
-                modifier = Modifier.size(22.dp)
-            )
+        Box(contentAlignment = Alignment.Center) {
+            IconButton(
+                onClick = onHint,
+                enabled = isPlayerTurn && !hasPendingPlacements && hintsLeft > 0,
+                modifier = Modifier
+                    .size(46.dp)
+                    .shadow(3.dp, CircleShape)
+                    .background(palette.cellBackground, CircleShape)
+                    .border(1.dp, palette.tileBorder.copy(alpha = 0.6f), CircleShape)
+                    .testTag("hint_button")
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_lightbulb),
+                    contentDescription = "Get Hint",
+                    tint = if (isPlayerTurn && !hasPendingPlacements && hintsLeft > 0) Color(0xFFE65100) else Color(0xFFE65100).copy(alpha = 0.35f),
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+            // Hint count badge
+            Box(
+                modifier = Modifier
+                    .size(15.dp)
+                    .align(Alignment.TopEnd)
+                    .offset(x = 1.dp, y = (-1).dp)
+                    .background(Color(0xFFE65100), CircleShape)
+                    .border(0.8.dp, Color.White, CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "$hintsLeft",
+                    color = Color.White,
+                    fontSize = 8.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    style = androidx.compose.ui.text.TextStyle(
+                        platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false)
+                    )
+                )
+            }
         }
 
         // Play Move Primary Button (High contrast, prominent pill)

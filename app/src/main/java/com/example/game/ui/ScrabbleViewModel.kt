@@ -56,7 +56,11 @@ data class ScrabbleUiState(
     val showGameOverDialog: Boolean = false,
     val definitionWord: String? = null,
     val hintMove: AiCandidateMove? = null,
-    val messageToast: String? = null
+    val messageToast: String? = null,
+    val hintsLeft: Int = 3,
+    val swapsLeft: Int = 3,
+    val peeksLeft: Int = 3,
+    val isPeeking: Boolean = false
 )
 
 class ScrabbleViewModel : ViewModel() {
@@ -107,6 +111,10 @@ class ScrabbleViewModel : ViewModel() {
                 showGameOverDialog = false,
                 definitionWord = null,
                 hintMove = null,
+                hintsLeft = 3,
+                swapsLeft = 3,
+                peeksLeft = 3,
+                isPeeking = false,
                 messageToast = "Game started! Place your first word over the center star (★)"
             )
         }
@@ -345,7 +353,7 @@ class ScrabbleViewModel : ViewModel() {
 
     fun onSwapTiles(tilesToSwap: List<Tile>) {
         val state = _uiState.value
-        if (!state.isPlayerTurn || tilesToSwap.isEmpty() || tileBag.size < tilesToSwap.size) return
+        if (!state.isPlayerTurn || tilesToSwap.isEmpty() || tileBag.size < tilesToSwap.size || state.swapsLeft <= 0) return
 
         onRecallAll()
 
@@ -373,6 +381,7 @@ class ScrabbleViewModel : ViewModel() {
                 isPlayerTurn = false,
                 showSwapDialog = false,
                 consecutivePasses = 0,
+                swapsLeft = it.swapsLeft - 1,
                 moveLogs = listOf(logEntry) + it.moveLogs,
                 messageToast = "Exchanged ${tilesToSwap.size} tiles"
             )
@@ -383,7 +392,7 @@ class ScrabbleViewModel : ViewModel() {
 
     fun onGetHint() {
         val state = _uiState.value
-        if (!state.isPlayerTurn) return
+        if (!state.isPlayerTurn || state.hintsLeft <= 0) return
 
         viewModelScope.launch {
             val hint = AiEngine.findHint(state.board, state.playerRack)
@@ -393,6 +402,7 @@ class ScrabbleViewModel : ViewModel() {
                 _uiState.update {
                     it.copy(
                         hintMove = hint,
+                        hintsLeft = it.hintsLeft - 1,
                         messageToast = "💡 Hint: Try playing \"$word\" for ~$pts pts!"
                     )
                 }
@@ -400,6 +410,25 @@ class ScrabbleViewModel : ViewModel() {
                 _uiState.update {
                     it.copy(messageToast = "No clear high-scoring play found. Try shuffling or swapping tiles!")
                 }
+            }
+        }
+    }
+
+    fun onPeekOpponent() {
+        val state = _uiState.value
+        if (!state.isPlayerTurn || state.peeksLeft <= 0 || state.isPeeking) return
+
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    peeksLeft = it.peeksLeft - 1,
+                    isPeeking = true,
+                    messageToast = "👁️ Peeking at opponent's tiles..."
+                )
+            }
+            delay(3000) // Keep peeked tiles visible for 3 seconds
+            _uiState.update {
+                it.copy(isPeeking = false)
             }
         }
     }
