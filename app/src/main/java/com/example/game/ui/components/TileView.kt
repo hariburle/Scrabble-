@@ -44,15 +44,19 @@ fun ScrabbleTileView(
     isSelected: Boolean = false,
     isPending: Boolean = false,
     isLastMove: Boolean = false,
+    isHint: Boolean = false,
+    onBoard: Boolean = false,
     onClick: (() -> Unit)? = null
 ) {
+    val isCommittedBoardTile = onBoard && !isPending && !isHint
+
     val scale by animateFloatAsState(
         targetValue = if (isSelected) 1.08f else if (isLastMove) 1.04f else 1.0f,
         animationSpec = spring(dampingRatio = 0.65f, stiffness = 380f),
         label = "tileScale"
     )
 
-    val elevation = if (isSelected) 8.dp else if (isPending) 4.dp else if (isLastMove) 4.dp else 2.dp
+    val elevation = if (isSelected) 8.dp else if (isPending) 4.dp else if (isLastMove) 4.dp else if (isHint) 0.dp else 2.dp
 
     Box(
         modifier = modifier
@@ -62,7 +66,17 @@ fun ScrabbleTileView(
             .clip(RoundedCornerShape(6.dp))
             .background(
                 brush = Brush.verticalGradient(
-                    colors = if (isPending) {
+                    colors = if (isHint) {
+                        listOf(
+                            palette.tileColor.copy(alpha = 0.45f),
+                            palette.tileColor.copy(alpha = 0.3f)
+                        )
+                    } else if (isCommittedBoardTile) {
+                        listOf(
+                            Color(0xFFFFE082), // High-visibility bright warm amber top
+                            Color(0xFFFFB300)  // Deep rich amber bottom for contrast
+                        )
+                    } else if (isPending) {
                         listOf(
                             palette.tileColor,
                             palette.tileColor.copy(alpha = 0.88f)
@@ -91,8 +105,13 @@ fun ScrabbleTileView(
                 )
             )
             .border(
-                width = if (isSelected) 2.dp else if (isPending) 1.5.dp else if (isLastMove) 2.dp else 1.dp,
-                color = if (isSelected) palette.secondaryColor else if (isPending) palette.primaryColor else if (isLastMove) Color(0xFFE65100) else palette.tileBorder,
+                width = if (isSelected) 2.dp else if (isPending) 1.5.dp else if (isLastMove) 2.dp else if (isHint) 1.5.dp else 1.dp,
+                color = if (isSelected) palette.secondaryColor 
+                        else if (isPending) palette.primaryColor 
+                        else if (isLastMove) Color(0xFFE65100) 
+                        else if (isHint) Color(0xFFFFB300).copy(alpha = 0.8f)
+                        else if (isCommittedBoardTile) Color(0xFF795548) // Chocolate border for coin contrast
+                        else palette.tileBorder,
                 shape = RoundedCornerShape(6.dp)
             )
             .then(
@@ -107,7 +126,10 @@ fun ScrabbleTileView(
         // Main Letter
         Text(
             text = if (letterChar == ' ') "" else letterChar.toString(),
-            color = if (isBlankAssigned) palette.primaryColor else palette.tileTextColor,
+            color = if (isCommittedBoardTile) Color(0xFF3E2723) // Deep rich chocolate for ultra-contrast readability
+                    else if (isHint) palette.tileTextColor.copy(alpha = 0.65f)
+                    else if (isBlankAssigned) palette.primaryColor 
+                    else palette.tileTextColor,
             fontSize = (size.value * 0.52f).sp,
             fontWeight = FontWeight.Bold,
             fontFamily = FontFamily.SansSerif,
@@ -119,7 +141,10 @@ fun ScrabbleTileView(
         if (tile.points > 0 || isBlankAssigned) {
             Text(
                 text = if (tile.isBlank) "★" else tile.points.toString(),
-                color = if (tile.isBlank) palette.secondaryColor else palette.tileTextColor.copy(alpha = 0.75f),
+                color = if (isCommittedBoardTile) Color(0xFF5D4037)
+                        else if (isHint) palette.tileTextColor.copy(alpha = 0.5f)
+                        else if (tile.isBlank) palette.secondaryColor 
+                        else palette.tileTextColor.copy(alpha = 0.75f),
                 fontSize = (size.value * 0.24f).sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier

@@ -58,6 +58,7 @@ import com.example.game.ui.components.ScoreHeader
 import com.example.game.ui.components.ThemePickerDialog
 import com.example.game.ui.components.TileSwapDialog
 import com.example.game.ui.components.WordDefinitionDialog
+import com.example.game.ui.components.CelebrationBanner
 
 @Composable
 fun ScrabbleScreen(
@@ -132,7 +133,8 @@ fun ScrabbleScreen(
                         lastMoveCells = state.lastMoveCells,
                         selectedCell = state.selectedBoardCell,
                         palette = palette,
-                        onCellClick = { r, c -> viewModel.onBoardCellClick(r, c) }
+                        onCellClick = { r, c -> viewModel.onBoardCellClick(r, c) },
+                        hintMove = state.hintMove
                     )
                 }
 
@@ -251,22 +253,13 @@ fun ScrabbleScreen(
                     onRestartGame = { viewModel.startNewGame() }
                 )
 
-                // Elegant Status Pill utilizing the vertical whitespace between scores and board
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 6.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    RackStatusPill(
-                        validationResult = state.validationResult,
-                        hasPendingPlacements = state.pendingPlacements.isNotEmpty(),
-                        isPlayerTurn = state.isPlayerTurn && !state.isAiThinking,
-                        isAiThinking = state.isAiThinking,
-                        statusMessage = state.messageToast,
-                        palette = palette
-                    )
-                }
+                // Fancy animated banner above the board for high score and nice words
+                CelebrationBanner(
+                    word = state.celebrationWord,
+                    points = state.celebrationPoints,
+                    isBingo = state.celebrationIsBingo,
+                    palette = palette
+                )
 
                 // Scrabble 15x15 Interactive Board (Takes available middle space)
                 Box(
@@ -282,7 +275,26 @@ fun ScrabbleScreen(
                         lastMoveCells = state.lastMoveCells,
                         selectedCell = state.selectedBoardCell,
                         palette = palette,
-                        onCellClick = { r, c -> viewModel.onBoardCellClick(r, c) }
+                        onCellClick = { r, c -> viewModel.onBoardCellClick(r, c) },
+                        hintMove = state.hintMove
+                    )
+                }
+
+                // Elegant Status Pill centered in the vertical space between the board and the letter tray (fixed height to prevent bouncing)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp)
+                        .padding(horizontal = 16.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    RackStatusPill(
+                        validationResult = state.validationResult,
+                        hasPendingPlacements = state.pendingPlacements.isNotEmpty(),
+                        isPlayerTurn = state.isPlayerTurn && !state.isAiThinking,
+                        isAiThinking = state.isAiThinking,
+                        statusMessage = state.messageToast,
+                        palette = palette
                     )
                 }
 
@@ -304,7 +316,8 @@ fun ScrabbleScreen(
                     onSwap = { viewModel.setDialogVisible(swap = true) },
                     onPlayMove = { viewModel.onPlayMove() },
                     onHint = { viewModel.onGetHint() },
-                    onPass = { viewModel.onPassTurn() }
+                    onPass = { viewModel.onPassTurn() },
+                    onRearrange = { from, to -> viewModel.onRearrangePlayerRack(from, to) }
                 )
             }
         }

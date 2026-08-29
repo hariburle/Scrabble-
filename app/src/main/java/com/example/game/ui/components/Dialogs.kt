@@ -143,6 +143,7 @@ fun BlankTilePickerDialog(
                     }
                 }
 
+                DialogCreditsSubtext(palette)
                 Spacer(modifier = Modifier.height(12.dp))
                 TextButton(onClick = onDismiss) {
                     Text("Cancel", color = palette.secondaryColor)
@@ -226,6 +227,8 @@ fun TileSwapDialog(
                     fontWeight = FontWeight.SemiBold,
                     color = palette.secondaryColor
                 )
+
+                DialogCreditsSubtext(palette)
 
                 Spacer(modifier = Modifier.height(16.dp))
 
@@ -396,6 +399,8 @@ fun DifficultySettingsDialog(
                         )
                     }
                 }
+
+                DialogCreditsSubtext(palette)
 
                 Spacer(modifier = Modifier.height(12.dp))
 
@@ -616,6 +621,8 @@ fun ThemePickerDialog(
                         }
                     )
                 }
+
+                DialogCreditsSubtext(palette)
 
                 Spacer(modifier = Modifier.height(12.dp))
 
@@ -921,6 +928,7 @@ fun MoveHistoryDialog(
                         }
                     }
                 }
+                DialogCreditsSubtext(palette)
             }
         }
     }
@@ -965,6 +973,7 @@ fun WordDefinitionDialog(
                     lineHeight = 20.sp,
                     color = palette.tileTextColor
                 )
+                DialogCreditsSubtext(palette)
             }
         },
         confirmButton = {
@@ -1084,6 +1093,7 @@ fun GameOverDialog(
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Play Again", fontWeight = FontWeight.Bold)
                 }
+                DialogCreditsSubtext(palette)
             }
         }
     }
@@ -1139,6 +1149,8 @@ fun GameStatsDialog(
                 StatRow("Highest Game Score", "${stats.highestScore} pts", palette)
                 StatRow("Best Word Played", if (stats.highestScoringWord.isNotEmpty()) "${stats.highestScoringWord} (${stats.highestWordPoints} pts)" else "-", palette)
                 StatRow("Total Words Formed", "${stats.totalWordsPlayed}", palette)
+
+                DialogCreditsSubtext(palette)
 
                 Spacer(modifier = Modifier.height(14.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -1335,3 +1347,17 @@ fun ScoreProgressionChart(
         }
     }
 }
+
+@Composable
+fun DialogCreditsSubtext(palette: GameThemePalette) {
+    Spacer(modifier = Modifier.height(12.dp))
+    Text(
+        text = "Created by Hari Burle with Google AI Studio",
+        color = palette.tileTextColor.copy(alpha = 0.45f),
+        fontSize = 10.sp,
+        fontWeight = FontWeight.SemiBold,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp)
+    )
+}
+

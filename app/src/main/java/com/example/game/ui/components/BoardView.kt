@@ -9,6 +9,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -53,6 +58,8 @@ import com.example.game.model.BonusType
 import com.example.game.model.GameThemePalette
 import com.example.game.model.Tile
 
+import com.example.game.engine.AiCandidateMove
+
 @Composable
 fun ScrabbleBoardView(
     board: Array<Array<BoardCell>>,
@@ -61,7 +68,8 @@ fun ScrabbleBoardView(
     selectedCell: Pair<Int, Int>?,
     palette: GameThemePalette,
     onCellClick: (row: Int, col: Int) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    hintMove: AiCandidateMove? = null
 ) {
     var scale by remember { mutableFloatStateOf(1.0f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
@@ -76,6 +84,10 @@ fun ScrabbleBoardView(
         ),
         label = "glowAlpha"
     )
+
+    val hintPlacementsMap = remember(hintMove) {
+        hintMove?.placements?.associate { (it.row to it.col) to it.tile } ?: emptyMap()
+    }
 
     BoxWithConstraints(
         modifier = modifier
@@ -93,20 +105,51 @@ fun ScrabbleBoardView(
                 .background(palette.boardBackground)
                 .border(1.5.dp, palette.primaryColor.copy(alpha = 0.2f), RoundedCornerShape(10.dp))
                 .pointerInput(Unit) {
-                    detectTransformGestures { _, pan, zoom, _ ->
-                        scale = (scale * zoom).coerceIn(1.0f, 3.0f)
-                        if (scale <= 1.01f) {
-                            scale = 1.0f
-                            offset = Offset.Zero
-                        } else {
-                            // Generous pan limit giving full 100% view of top/bottom/left/right border cells with margin
-                            val boardPx = size.width.toFloat()
-                            val maxPan = (boardPx * (scale - 1f)) / 2f + (36f * (scale - 1f))
-                            offset = Offset(
-                                x = (offset.x + pan.x).coerceIn(-maxPan, maxPan),
-                                y = (offset.y + pan.y).coerceIn(-maxPan, maxPan)
-                            )
-                        }
+                    awaitEachGesture {
+                        var zoom = 1f
+                        var pan = Offset.Zero
+                        var pastTouchSlop = false
+                        val touchSlop = viewConfiguration.touchSlop
+
+                        awaitFirstDown(requireUnconsumed = false)
+                        do {
+                            val event = awaitPointerEvent()
+                            val canceled = event.changes.any { it.isConsumed }
+                            if (!canceled) {
+                                val pointerCount = event.changes.size
+                                if (pointerCount >= 2) {
+                                    val zoomChange = event.calculateZoom()
+                                    val panChange = event.calculatePan()
+
+                                    if (!pastTouchSlop) {
+                                        zoom *= zoomChange
+                                        pan += panChange
+                                        val centroid = event.calculateCentroid(useCurrent = false)
+                                        val zoomMotion = kotlin.math.abs(1 - zoom) * centroid.getDistance()
+                                        val panMotion = pan.getDistance()
+                                        if (zoomMotion > touchSlop || panMotion > touchSlop) {
+                                            pastTouchSlop = true
+                                        }
+                                    }
+
+                                    if (pastTouchSlop) {
+                                        scale = (scale * zoomChange).coerceIn(1.0f, 3.0f)
+                                        if (scale <= 1.01f) {
+                                            scale = 1.0f
+                                            offset = Offset.Zero
+                                        } else {
+                                            val boardPx = size.width.toFloat()
+                                            val maxPan = (boardPx * (scale - 1f)) / 2f + (36f * (scale - 1f))
+                                            offset = Offset(
+                                                x = (offset.x + panChange.x).coerceIn(-maxPan, maxPan),
+                                                y = (offset.y + panChange.y).coerceIn(-maxPan, maxPan)
+                                            )
+                                        }
+                                        event.changes.forEach { it.consume() }
+                                    }
+                                }
+                            }
+                        } while (event.changes.any { it.pressed })
                     }
                 },
             contentAlignment = Alignment.Center
@@ -136,7 +179,8 @@ fun ScrabbleBoardView(
                             for (c in 0 until ScrabbleEngine.BOARD_SIZE) {
                                 val cell = board[r][c]
                                 val pendingTile = pendingPlacements[r to c]
-                                val tile = pendingTile ?: cell.tile
+                                val hintTile = hintPlacementsMap[r to c]
+                                val tile = pendingTile ?: cell.tile ?: hintTile
                                 val isSelected = selectedCell == (r to c)
                                 val isLastMove = lastMoveCells.contains(r to c)
 
@@ -144,6 +188,7 @@ fun ScrabbleBoardView(
                                     cell = cell,
                                     tile = tile,
                                     isPending = pendingTile != null,
+                                    isHint = hintTile != null,
                                     isSelected = isSelected,
                                     isLastMove = isLastMove,
                                     glowAlpha = glowAlpha,
@@ -216,6 +261,7 @@ fun BoardCellView(
     cell: BoardCell,
     tile: Tile?,
     isPending: Boolean,
+    isHint: Boolean,
     isSelected: Boolean,
     isLastMove: Boolean,
     glowAlpha: Float,
@@ -257,7 +303,9 @@ fun BoardCellView(
                 size = cellSize - 1.5.dp,
                 isSelected = isSelected,
                 isPending = isPending,
-                isLastMove = isLastMove
+                isHint = isHint,
+                isLastMove = isLastMove,
+                onBoard = true
             )
         } else {
             // Display multiplier text with gentle, muted contrast that never overpowers the board

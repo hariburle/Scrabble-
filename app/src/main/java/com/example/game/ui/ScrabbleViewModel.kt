@@ -60,7 +60,10 @@ data class ScrabbleUiState(
     val hintsLeft: Int = 3,
     val swapsLeft: Int = 3,
     val peeksLeft: Int = 3,
-    val isPeeking: Boolean = false
+    val isPeeking: Boolean = false,
+    val celebrationWord: String? = null,
+    val celebrationPoints: Int = 0,
+    val celebrationIsBingo: Boolean = false
 )
 
 class ScrabbleViewModel : ViewModel() {
@@ -242,6 +245,36 @@ class ScrabbleViewModel : ViewModel() {
         }
     }
 
+    fun onRearrangePlayerRack(fromIndex: Int, toIndex: Int) {
+        val current = _uiState.value.playerRack
+        if (fromIndex in current.indices && toIndex in current.indices) {
+            val updated = current.toMutableList()
+            val tile = updated.removeAt(fromIndex)
+            updated.add(toIndex, tile)
+            _uiState.update {
+                // If the selected index was one of the rearranged, keep selection with the tile
+                val selectedIdx = it.selectedRackIndex
+                val nextSelected = if (selectedIdx == null) {
+                    null
+                } else {
+                    when (selectedIdx) {
+                        fromIndex -> toIndex
+                        in minOf(fromIndex, toIndex)..maxOf(fromIndex, toIndex) -> {
+                            // Shift other indexes
+                            val dir = if (toIndex > fromIndex) -1 else 1
+                            selectedIdx + dir
+                        }
+                        else -> selectedIdx
+                    }
+                }
+                it.copy(
+                    playerRack = updated,
+                    selectedRackIndex = nextSelected
+                )
+            }
+        }
+    }
+
     fun onPlayMove() {
         val state = _uiState.value
         val validation = state.validationResult
@@ -289,6 +322,25 @@ class ScrabbleViewModel : ViewModel() {
 
         val lastCells = state.pendingPlacements.keys
 
+        val isBingo = validation.isBingo
+        val isMega = pointsEarned >= 40 || isBingo
+        val isHighScoreWord = pointsEarned >= 15
+
+        if (isMega) {
+            com.example.game.ui.components.GameAudioSynthesizer.playMegaScorePlay()
+        } else if (pointsEarned >= 20) {
+            com.example.game.ui.components.GameAudioSynthesizer.playHighScorePlay()
+        } else {
+            com.example.game.ui.components.GameAudioSynthesizer.playNormalPlay()
+        }
+
+        if (isHighScoreWord) {
+            viewModelScope.launch {
+                delay(6000)
+                clearCelebration()
+            }
+        }
+
         _uiState.update {
             it.copy(
                 board = newBoard,
@@ -305,7 +357,10 @@ class ScrabbleViewModel : ViewModel() {
                 bestWordPoints = newBestWordPts,
                 isPlayerTurn = false,
                 consecutivePasses = 0,
-                messageToast = "You played $wordPlayed (+$pointsEarned pts)!"
+                messageToast = "You played $wordPlayed (+$pointsEarned pts)!",
+                celebrationWord = if (isHighScoreWord) wordPlayed else null,
+                celebrationPoints = if (isHighScoreWord) pointsEarned else 0,
+                celebrationIsBingo = if (isHighScoreWord) isBingo else false
             )
         }
 
@@ -405,6 +460,15 @@ class ScrabbleViewModel : ViewModel() {
                         hintsLeft = it.hintsLeft - 1,
                         messageToast = "💡 Hint: Try playing \"$word\" for ~$pts pts!"
                     )
+                }
+                // Brief placement duration: 6 seconds before clearing from board
+                kotlinx.coroutines.delay(6000)
+                _uiState.update {
+                    if (it.hintMove == hint) {
+                        it.copy(hintMove = null)
+                    } else {
+                        it
+                    }
                 }
             } else {
                 _uiState.update {
@@ -725,5 +789,15 @@ class ScrabbleViewModel : ViewModel() {
 
     fun clearToast() {
         _uiState.update { it.copy(messageToast = null) }
+    }
+
+    fun clearCelebration() {
+        _uiState.update {
+            it.copy(
+                celebrationWord = null,
+                celebrationPoints = 0,
+                celebrationIsBingo = false
+            )
+        }
     }
 }
