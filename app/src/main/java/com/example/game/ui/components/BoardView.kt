@@ -1,0 +1,271 @@
+package com.example.game.ui.components
+
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CropFree
+import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.example.game.engine.ScrabbleEngine
+import com.example.game.model.BoardCell
+import com.example.game.model.BonusType
+import com.example.game.model.GameThemePalette
+import com.example.game.model.Tile
+
+@Composable
+fun ScrabbleBoardView(
+    board: Array<Array<BoardCell>>,
+    pendingPlacements: Map<Pair<Int, Int>, Tile>,
+    lastMoveCells: Set<Pair<Int, Int>>,
+    selectedCell: Pair<Int, Int>?,
+    palette: GameThemePalette,
+    onCellClick: (row: Int, col: Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var scale by remember { mutableFloatStateOf(1.0f) }
+    var offset by remember { mutableStateOf(Offset.Zero) }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "lastMoveGlow")
+    val glowAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 0.85f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "glowAlpha"
+    )
+
+    BoxWithConstraints(
+        modifier = modifier
+            .fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        val boardDimension = minOf(maxWidth, maxHeight) - 4.dp
+        val cellSize = (boardDimension - 12.dp) / ScrabbleEngine.BOARD_SIZE
+
+        Box(
+            modifier = Modifier
+                .size(boardDimension)
+                .shadow(6.dp, RoundedCornerShape(12.dp))
+                .clip(RoundedCornerShape(12.dp))
+                .background(palette.boardBackground)
+                .border(2.dp, palette.primaryColor.copy(alpha = 0.25f), RoundedCornerShape(12.dp))
+                .pointerInput(Unit) {
+                    detectTransformGestures { _, pan, zoom, _ ->
+                        scale = (scale * zoom).coerceIn(1.0f, 2.5f)
+                        if (scale == 1.0f) {
+                            offset = Offset.Zero
+                        } else {
+                            val maxPan = 300f * (scale - 1f)
+                            offset = Offset(
+                                x = (offset.x + pan.x).coerceIn(-maxPan, maxPan),
+                                y = (offset.y + pan.y).coerceIn(-maxPan, maxPan)
+                            )
+                        }
+                    }
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            // Main 15x15 Grid with Zoom/Pan transform
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer(
+                        scaleX = scale,
+                        scaleY = scale,
+                        translationX = offset.x,
+                        translationY = offset.y
+                    )
+                    .padding(3.dp)
+                    .testTag("scrabble_board_grid")
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    for (r in 0 until ScrabbleEngine.BOARD_SIZE) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f)
+                        ) {
+                            for (c in 0 until ScrabbleEngine.BOARD_SIZE) {
+                                val cell = board[r][c]
+                                val pendingTile = pendingPlacements[r to c]
+                                val tile = pendingTile ?: cell.tile
+                                val isSelected = selectedCell == (r to c)
+                                val isLastMove = lastMoveCells.contains(r to c)
+
+                                BoardCellView(
+                                    cell = cell,
+                                    tile = tile,
+                                    isPending = pendingTile != null,
+                                    isSelected = isSelected,
+                                    isLastMove = isLastMove,
+                                    glowAlpha = glowAlpha,
+                                    palette = palette,
+                                    cellSize = cellSize,
+                                    onClick = { onCellClick(r, c) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Quick Zoom Controls Overlay in bottom right
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(6.dp)
+                    .shadow(4.dp, RoundedCornerShape(20.dp)),
+                shape = RoundedCornerShape(20.dp),
+                color = palette.cellBackground.copy(alpha = 0.92f)
+            ) {
+                Row(
+                    modifier = Modifier.padding(2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(
+                        onClick = {
+                            scale = (scale + 0.35f).coerceAtMost(2.5f)
+                        },
+                        modifier = Modifier.size(34.dp),
+                        colors = IconButtonDefaults.iconButtonColors(contentColor = palette.primaryColor)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = "Zoom In", modifier = Modifier.size(17.dp))
+                    }
+
+                    IconButton(
+                        onClick = {
+                            scale = 1.0f
+                            offset = Offset.Zero
+                        },
+                        modifier = Modifier.size(34.dp),
+                        colors = IconButtonDefaults.iconButtonColors(contentColor = palette.primaryColor)
+                    ) {
+                        Icon(Icons.Default.CropFree, contentDescription = "Reset Zoom", modifier = Modifier.size(17.dp))
+                    }
+
+                    IconButton(
+                        onClick = {
+                            scale = (scale - 0.35f).coerceAtLeast(1.0f)
+                            if (scale == 1.0f) offset = Offset.Zero
+                        },
+                        modifier = Modifier.size(34.dp),
+                        colors = IconButtonDefaults.iconButtonColors(contentColor = palette.primaryColor)
+                    ) {
+                        Icon(Icons.Default.Remove, contentDescription = "Zoom Out", modifier = Modifier.size(17.dp))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun BoardCellView(
+    cell: BoardCell,
+    tile: Tile?,
+    isPending: Boolean,
+    isSelected: Boolean,
+    isLastMove: Boolean,
+    glowAlpha: Float,
+    palette: GameThemePalette,
+    cellSize: Dp,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val bgBonusColor = when (cell.bonusType) {
+        BonusType.TRIPLE_WORD -> palette.twsColor
+        BonusType.DOUBLE_WORD -> palette.dwsColor
+        BonusType.TRIPLE_LETTER -> palette.tlsColor
+        BonusType.DOUBLE_LETTER -> palette.dlsColor
+        BonusType.CENTER -> palette.centerColor
+        BonusType.NONE -> palette.cellBackground
+    }
+
+    Box(
+        modifier = modifier
+            .aspectRatio(1f)
+            .padding(1.dp)
+            .clip(RoundedCornerShape(3.dp))
+            .background(bgBonusColor)
+            .border(
+                width = if (isSelected) 2.dp else if (isLastMove) 1.5.dp else 0.5.dp,
+                color = if (isSelected) palette.secondaryColor
+                else if (isLastMove) palette.secondaryColor.copy(alpha = glowAlpha)
+                else palette.tileBorder.copy(alpha = 0.4f),
+                shape = RoundedCornerShape(3.dp)
+            )
+            .clickable(onClick = onClick)
+            .testTag("cell_${cell.row}_${cell.col}"),
+        contentAlignment = Alignment.Center
+    ) {
+        if (tile != null) {
+            ScrabbleTileView(
+                tile = tile,
+                palette = palette,
+                size = cellSize - 2.dp,
+                isSelected = isSelected,
+                isPending = isPending,
+                isLastMove = isLastMove
+            )
+        } else {
+            // Display multiplier text
+            if (cell.bonusType != BonusType.NONE) {
+                Text(
+                    text = cell.bonusType.shortLabel,
+                    color = Color.White,
+                    fontSize = (cellSize.value * 0.32f).coerceIn(7f, 13f).sp,
+                    fontWeight = FontWeight.Black,
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+    }
+}
