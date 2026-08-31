@@ -16,7 +16,11 @@ import com.example.game.model.MoveScoreResult
 import com.example.game.model.PlacedTile
 import com.example.game.model.ThemeMode
 import com.example.game.model.Tile
+import com.example.game.model.WinConditionType
+import com.example.game.model.InspectedWordInfo
+import com.example.game.ui.components.GameAudioSynthesizer
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -36,9 +40,18 @@ data class ScrabbleUiState(
     val selectedRackIndex: Int? = null,
     val selectedBoardCell: Pair<Int, Int>? = null,
     val lastMoveCells: Set<Pair<Int, Int>> = emptySet(),
+    val lastWordSpanCells: Set<Pair<Int, Int>> = emptySet(),
+    val lastPlayedWord: String? = null,
+    val lastPlayedScore: Int = 0,
+    val lastPlayedIsPlayer: Boolean = true,
     val validationResult: MoveScoreResult? = null,
     val difficulty: Difficulty = Difficulty.BALANCED,
     val customSettings: CustomDifficultySettings = CustomDifficultySettings(),
+    val winConditionType: WinConditionType = WinConditionType.CLASSIC,
+    val targetScore: Int = 150,
+    val maxTurnsPerPlayer: Int = 12,
+    val playerTurnCount: Int = 0,
+    val aiTurnCount: Int = 0,
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val currentTheme: GameThemePalette = GameThemePalette.BOTANICAL_ZEN,
     val moveLogs: List<GameLogEntry> = emptyList(),
@@ -55,6 +68,7 @@ data class ScrabbleUiState(
     val showStatsDialog: Boolean = false,
     val showGameOverDialog: Boolean = false,
     val definitionWord: String? = null,
+    val inspectedWordInfo: InspectedWordInfo? = null,
     val hintMove: AiCandidateMove? = null,
     val messageToast: String? = null,
     val hintsLeft: Int = 3,
@@ -63,7 +77,19 @@ data class ScrabbleUiState(
     val isPeeking: Boolean = false,
     val celebrationWord: String? = null,
     val celebrationPoints: Int = 0,
-    val celebrationIsBingo: Boolean = false
+    val celebrationIsBingo: Boolean = false,
+    val isSnapModeActive: Boolean = false,
+    val snapSelectedCell: Pair<Int, Int>? = null,
+    val snapPreviewIsHorizontal: Boolean = true,
+    val snapWordTray: List<Tile> = emptyList(),
+    val fullRackBeforeSnap: List<Tile> = emptyList(),
+    val isSoundEnabled: Boolean = true,
+    val isTimedModeEnabled: Boolean = false,
+    val turnTimeLimitSeconds: Int = 120,
+    val playerTimeLeftSeconds: Int = 120,
+    val showDebugDialog: Boolean = false,
+    val lastErrorLog: String? = null,
+    val debugLogs: List<String> = emptyList()
 )
 
 class ScrabbleViewModel : ViewModel() {
@@ -72,6 +98,8 @@ class ScrabbleViewModel : ViewModel() {
     val uiState: StateFlow<ScrabbleUiState> = _uiState.asStateFlow()
 
     private var tileBag = mutableListOf<Tile>()
+    private var timerJob: kotlinx.coroutines.Job? = null
+    private var wordInspectionDismissJob: kotlinx.coroutines.Job? = null
 
     init {
         viewModelScope.launch {
@@ -118,9 +146,13 @@ class ScrabbleViewModel : ViewModel() {
                 swapsLeft = 3,
                 peeksLeft = 3,
                 isPeeking = false,
+                isSnapModeActive = false,
+                snapSelectedCell = null,
+                fullRackBeforeSnap = emptyList(),
                 messageToast = "Game started! Place your first word over the center star (★)"
             )
         }
+        startTurnTimer()
     }
 
     fun onRackTileClick(index: Int) {
@@ -138,6 +170,11 @@ class ScrabbleViewModel : ViewModel() {
     fun onBoardCellClick(row: Int, col: Int) {
         val state = _uiState.value
         if (!state.isPlayerTurn || state.isAiThinking) return
+
+        if (state.isSnapModeActive) {
+            updateSnapPreview(row, col, state.snapPreviewIsHorizontal)
+            return
+        }
 
         val cell = state.board[row][col]
         val pendingTile = state.pendingPlacements[row to col]
@@ -161,9 +198,15 @@ class ScrabbleViewModel : ViewModel() {
             return
         }
 
-        // If cell is already occupied by a permanently played tile, cannot place
+        // If cell is already occupied by a permanently played tile, inspect the word on board
         if (cell.tile != null) {
+            inspectTileAt(row, col)
             return
+        }
+
+        // If an empty cell is tapped and there was an active word inspection, dismiss inspection
+        if (state.inspectedWordInfo != null) {
+            _uiState.update { it.copy(inspectedWordInfo = null) }
         }
 
         // If a rack tile is selected, place it here!
@@ -175,6 +218,45 @@ class ScrabbleViewModel : ViewModel() {
 
             if (tileToPlace.isBlank) {
                 // Show blank letter picker
+                val newPending = state.pendingPlacements.toMutableMap()
+                newPending[row to col] = tileToPlace
+                _uiState.update {
+                    it.copy(
+                        playerRack = newRack,
+                        pendingPlacements = newPending,
+                        selectedRackIndex = null,
+                        blankPickerCell = row to col
+                    )
+                }
+            } else {
+                val newPending = state.pendingPlacements.toMutableMap()
+                newPending[row to col] = tileToPlace
+                val validation = evaluatePendingPlacements(state.board, newPending)
+                _uiState.update {
+                    it.copy(
+                        playerRack = newRack,
+                        pendingPlacements = newPending,
+                        selectedRackIndex = null,
+                        validationResult = validation
+                    )
+                }
+            }
+        }
+    }
+
+    fun onDropTileOnBoard(rackIndex: Int, row: Int, col: Int) {
+        val state = _uiState.value
+        if (!state.isPlayerTurn || state.isAiThinking) return
+
+        val cell = state.board[row][col]
+        if (cell.tile != null || state.pendingPlacements.containsKey(row to col)) return
+
+        if (rackIndex in state.playerRack.indices) {
+            val tileToPlace = state.playerRack[rackIndex]
+            val newRack = state.playerRack.toMutableList()
+            newRack.removeAt(rackIndex)
+
+            if (tileToPlace.isBlank) {
                 val newPending = state.pendingPlacements.toMutableMap()
                 newPending[row to col] = tileToPlace
                 _uiState.update {
@@ -222,6 +304,10 @@ class ScrabbleViewModel : ViewModel() {
 
     fun onRecallAll() {
         val state = _uiState.value
+        if (state.isSnapModeActive) {
+            cancelSnapMode()
+            return
+        }
         if (state.pendingPlacements.isEmpty()) return
 
         val newRack = state.playerRack.toMutableList()
@@ -275,103 +361,196 @@ class ScrabbleViewModel : ViewModel() {
         }
     }
 
+    private fun computeWordSpanCells(formedWords: List<com.example.game.model.FormedWord>): Set<Pair<Int, Int>> {
+        val cells = mutableSetOf<Pair<Int, Int>>()
+        for (fw in formedWords) {
+            for (i in fw.word.indices) {
+                val r = if (fw.isHorizontal) fw.startRow else fw.startRow + i
+                val c = if (fw.isHorizontal) fw.startCol + i else fw.startCol
+                cells.add(r to c)
+            }
+        }
+        return cells
+    }
+
     fun onPlayMove() {
         val state = _uiState.value
         val validation = state.validationResult
         if (!state.isPlayerTurn || validation == null || !validation.isValid) return
 
-        val placements = state.pendingPlacements.map { PlacedTile(it.key.first, it.key.second, it.value) }
-        val newBoard = Array(ScrabbleEngine.BOARD_SIZE) { r ->
-            Array(ScrabbleEngine.BOARD_SIZE) { c ->
-                val existing = state.board[r][c]
-                val newlyPlaced = state.pendingPlacements[r to c]
-                if (newlyPlaced != null) {
-                    existing.copy(tile = newlyPlaced)
+        try {
+            val placements = state.pendingPlacements.map { PlacedTile(it.key.first, it.key.second, it.value) }
+            val newBoard = Array(ScrabbleEngine.BOARD_SIZE) { r ->
+                Array(ScrabbleEngine.BOARD_SIZE) { c ->
+                    val existing = state.board[r][c]
+                    val newlyPlaced = state.pendingPlacements[r to c]
+                    if (newlyPlaced != null) {
+                        existing.copy(tile = newlyPlaced)
+                    } else {
+                        existing
+                    }
+                }
+            }
+
+            val allWords = validation.allWords
+            val wordPlayed = validation.primaryWord?.word
+                ?: validation.crossWords.maxByOrNull { it.points }?.word
+                ?: validation.crossWords.firstOrNull()?.word
+                ?: "WORD"
+            val secondaryWords = allWords.map { it.word }.filter { it != wordPlayed }
+            val allFormedWords = allWords.map { it.word }
+            val pointsEarned = validation.totalScore
+            val newPlayerScore = state.playerScore + pointsEarned
+            val newPlayerTurnCount = state.playerTurnCount + 1
+
+            // Safely resolve the remaining rack regardless of whether move was submitted via Snap Mode or Drag/Drop
+            val placedTileIds = state.pendingPlacements.values.map { it.id }.toSet()
+            val fullRack = if (state.fullRackBeforeSnap.isNotEmpty()) state.fullRackBeforeSnap else state.playerRack
+            val remainingRack = fullRack.filter { it.id !in placedTileIds }
+            val tilesNeeded = (7 - remainingRack.size).coerceIn(0, 7)
+            val drawn = ScrabbleEngine.drawTiles(tileBag, tilesNeeded)
+            val replenishedRack = remainingRack + drawn
+
+            val lastCells = state.pendingPlacements.keys.toSet()
+            val fullSpanCells = computeWordSpanCells(allWords).ifEmpty { lastCells }
+
+            // Record Move Log
+            val logEntry = GameLogEntry(
+                turnNumber = state.moveLogs.size + 1,
+                isPlayer = true,
+                word = wordPlayed,
+                points = pointsEarned,
+                description = "You played \"$wordPlayed\" for $pointsEarned pts" + (if (validation.isBingo) " (Bingo +50!)" else ""),
+                secondaryWords = secondaryWords,
+                placedCoordinates = lastCells,
+                allFormedWords = allFormedWords
+            )
+
+            // Update stats
+            val newBestWord = if (pointsEarned > state.bestWordPoints) wordPlayed else state.bestWord
+            val newBestWordPts = maxOf(pointsEarned, state.bestWordPoints)
+            val updatedStats = state.stats.copy(
+                highestScore = maxOf(newPlayerScore, state.stats.highestScore),
+                highestScoringWord = if (pointsEarned > state.stats.highestWordPoints) wordPlayed else state.stats.highestScoringWord,
+                highestWordPoints = maxOf(pointsEarned, state.stats.highestWordPoints),
+                totalWordsPlayed = state.stats.totalWordsPlayed + 1
+            )
+
+            val isBingo = validation.isBingo
+            val isMega = pointsEarned >= 40 || isBingo
+            val isHighScoreWord = pointsEarned >= 15
+
+            try {
+                if (isMega) {
+                    com.example.game.ui.components.GameAudioSynthesizer.playMegaScorePlay()
+                } else if (pointsEarned >= 20) {
+                    com.example.game.ui.components.GameAudioSynthesizer.playHighScorePlay()
                 } else {
-                    existing
+                    com.example.game.ui.components.GameAudioSynthesizer.playNormalPlay()
+                }
+            } catch (audioErr: Throwable) {
+                // Audio synthesis should never interrupt game logic
+            }
+
+            if (isHighScoreWord) {
+                viewModelScope.launch {
+                    delay(6000)
+                    clearCelebration()
+                }
+            }
+
+            _uiState.update {
+                it.copy(
+                    board = newBoard,
+                    playerRack = replenishedRack,
+                    tileBagCount = tileBag.size,
+                    playerScore = newPlayerScore,
+                    pendingPlacements = emptyMap(),
+                    selectedRackIndex = null,
+                    validationResult = null,
+                    lastMoveCells = lastCells,
+                    lastWordSpanCells = fullSpanCells,
+                    lastPlayedWord = wordPlayed,
+                    lastPlayedScore = pointsEarned,
+                    lastPlayedIsPlayer = true,
+                    playerTurnCount = newPlayerTurnCount,
+                    moveLogs = listOf(logEntry) + it.moveLogs,
+                    stats = updatedStats,
+                    bestWord = newBestWord,
+                    bestWordPoints = newBestWordPts,
+                    isPlayerTurn = false,
+                    consecutivePasses = 0,
+                    isSnapModeActive = false,
+                    fullRackBeforeSnap = emptyList(),
+                    snapWordTray = emptyList(),
+                    snapSelectedCell = null,
+                    messageToast = "You played \"$wordPlayed\" (+$pointsEarned pts)!",
+                    celebrationWord = if (isHighScoreWord) wordPlayed else null,
+                    celebrationPoints = if (isHighScoreWord) pointsEarned else 0,
+                    celebrationIsBingo = if (isHighScoreWord) isBingo else false
+                )
+            }
+
+            // Check for game end condition
+            if (checkWinConditions(newPlayerScore, state.aiScore, newPlayerTurnCount, state.aiTurnCount, replenishedRack.isEmpty())) {
+                return
+            }
+
+            // Trigger AI Turn
+            triggerAiTurn()
+        } catch (e: Throwable) {
+            logDebugError("Crash in onPlayMove: ${e.message}", e)
+            _uiState.update {
+                it.copy(
+                    messageToast = "⚠️ Recovered from move error: ${e.message ?: "State safely restored"}",
+                    isPlayerTurn = true,
+                    isAiThinking = false
+                )
+            }
+        }
+    }
+
+    private fun checkWinConditions(
+        playerScore: Int,
+        aiScore: Int,
+        playerTurns: Int,
+        aiTurns: Int,
+        playerRackEmpty: Boolean
+    ): Boolean {
+        val state = _uiState.value
+        when (state.winConditionType) {
+            WinConditionType.TARGET_SCORE -> {
+                if (playerScore >= state.targetScore || aiScore >= state.targetScore) {
+                    endGame()
+                    return true
+                }
+            }
+            WinConditionType.TURN_LIMIT -> {
+                if (playerTurns >= state.maxTurnsPerPlayer && aiTurns >= state.maxTurnsPerPlayer) {
+                    endGame()
+                    return true
+                }
+            }
+            WinConditionType.CLASSIC -> {
+                if (tileBag.isEmpty() && (playerRackEmpty || state.aiRack.isEmpty())) {
+                    endGame()
+                    return true
                 }
             }
         }
+        return false
+    }
 
-        val wordPlayed = validation.primaryWord?.word ?: "WORD"
-        val pointsEarned = validation.totalScore
-        val newPlayerScore = state.playerScore + pointsEarned
-
-        // Draw new tiles to replenish rack to 7
-        val drawn = ScrabbleEngine.drawTiles(tileBag, 7 - state.playerRack.size)
-        val replenishedRack = state.playerRack + drawn
-
-        // Record Move Log
-        val logEntry = GameLogEntry(
-            turnNumber = state.moveLogs.size + 1,
-            isPlayer = true,
-            word = wordPlayed,
-            points = pointsEarned,
-            description = "You played \"$wordPlayed\" for $pointsEarned pts" + (if (validation.isBingo) " (Bingo +50!)" else "")
-        )
-
-        // Update stats
-        val newBestWord = if (pointsEarned > state.bestWordPoints) wordPlayed else state.bestWord
-        val newBestWordPts = maxOf(pointsEarned, state.bestWordPoints)
-        val updatedStats = state.stats.copy(
-            highestScore = maxOf(newPlayerScore, state.stats.highestScore),
-            highestScoringWord = if (pointsEarned > state.stats.highestWordPoints) wordPlayed else state.stats.highestScoringWord,
-            highestWordPoints = maxOf(pointsEarned, state.stats.highestWordPoints),
-            totalWordsPlayed = state.stats.totalWordsPlayed + 1
-        )
-
-        val lastCells = state.pendingPlacements.keys
-
-        val isBingo = validation.isBingo
-        val isMega = pointsEarned >= 40 || isBingo
-        val isHighScoreWord = pointsEarned >= 15
-
-        if (isMega) {
-            com.example.game.ui.components.GameAudioSynthesizer.playMegaScorePlay()
-        } else if (pointsEarned >= 20) {
-            com.example.game.ui.components.GameAudioSynthesizer.playHighScorePlay()
-        } else {
-            com.example.game.ui.components.GameAudioSynthesizer.playNormalPlay()
-        }
-
-        if (isHighScoreWord) {
-            viewModelScope.launch {
-                delay(6000)
-                clearCelebration()
-            }
-        }
-
+    private fun logDebugError(message: String, throwable: Throwable? = null) {
+        android.util.Log.e("ScrabbleViewModel", message, throwable)
+        val stackTraceStr = throwable?.stackTraceToString() ?: ""
+        val fullLog = "$message\n$stackTraceStr"
         _uiState.update {
             it.copy(
-                board = newBoard,
-                playerRack = replenishedRack,
-                tileBagCount = tileBag.size,
-                playerScore = newPlayerScore,
-                pendingPlacements = emptyMap(),
-                selectedRackIndex = null,
-                validationResult = null,
-                lastMoveCells = lastCells,
-                moveLogs = listOf(logEntry) + it.moveLogs,
-                stats = updatedStats,
-                bestWord = newBestWord,
-                bestWordPoints = newBestWordPts,
-                isPlayerTurn = false,
-                consecutivePasses = 0,
-                messageToast = "You played $wordPlayed (+$pointsEarned pts)!",
-                celebrationWord = if (isHighScoreWord) wordPlayed else null,
-                celebrationPoints = if (isHighScoreWord) pointsEarned else 0,
-                celebrationIsBingo = if (isHighScoreWord) isBingo else false
+                lastErrorLog = fullLog,
+                debugLogs = (it.debugLogs + message).takeLast(50)
             )
         }
-
-        // Check for game end condition
-        if (replenishedRack.isEmpty() && tileBag.isEmpty()) {
-            endGame()
-            return
-        }
-
-        // Trigger AI Turn
-        triggerAiTurn()
     }
 
     fun onPassTurn() {
@@ -380,6 +559,8 @@ class ScrabbleViewModel : ViewModel() {
 
         onRecallAll()
 
+        val newPasses = state.consecutivePasses + 1
+        val newPlayerTurnCount = state.playerTurnCount + 1
         val logEntry = GameLogEntry(
             turnNumber = state.moveLogs.size + 1,
             isPlayer = true,
@@ -389,17 +570,17 @@ class ScrabbleViewModel : ViewModel() {
             isPassOrSwap = true
         )
 
-        val newPasses = state.consecutivePasses + 1
         _uiState.update {
             it.copy(
                 isPlayerTurn = false,
+                playerTurnCount = newPlayerTurnCount,
                 consecutivePasses = newPasses,
                 moveLogs = listOf(logEntry) + it.moveLogs,
                 messageToast = "You passed your turn"
             )
         }
 
-        if (newPasses >= 4) {
+        if (newPasses >= 4 || checkWinConditions(state.playerScore, state.aiScore, newPlayerTurnCount, state.aiTurnCount, false)) {
             endGame()
         } else {
             triggerAiTurn()
@@ -420,6 +601,7 @@ class ScrabbleViewModel : ViewModel() {
         val drawn = ScrabbleEngine.drawTiles(tileBag, tilesToSwap.size)
         newRack.addAll(drawn)
 
+        val newPlayerTurnCount = state.playerTurnCount + 1
         val logEntry = GameLogEntry(
             turnNumber = state.moveLogs.size + 1,
             isPlayer = true,
@@ -433,6 +615,7 @@ class ScrabbleViewModel : ViewModel() {
             it.copy(
                 playerRack = newRack,
                 tileBagCount = tileBag.size,
+                playerTurnCount = newPlayerTurnCount,
                 isPlayerTurn = false,
                 showSwapDialog = false,
                 consecutivePasses = 0,
@@ -442,7 +625,11 @@ class ScrabbleViewModel : ViewModel() {
             )
         }
 
-        triggerAiTurn()
+        if (checkWinConditions(state.playerScore, state.aiScore, newPlayerTurnCount, state.aiTurnCount, false)) {
+            endGame()
+        } else {
+            triggerAiTurn()
+        }
     }
 
     fun onGetHint() {
@@ -452,7 +639,9 @@ class ScrabbleViewModel : ViewModel() {
         viewModelScope.launch {
             val hint = AiEngine.findHint(state.board, state.playerRack)
             if (hint != null && hint.scoreResult.isValid) {
-                val word = hint.scoreResult.primaryWord?.word ?: "word"
+                val word = hint.scoreResult.primaryWord?.word
+                    ?: hint.scoreResult.crossWords.firstOrNull()?.word
+                    ?: "word"
                 val pts = hint.scoreResult.totalScore
                 _uiState.update {
                     it.copy(
@@ -498,6 +687,7 @@ class ScrabbleViewModel : ViewModel() {
     }
 
     private fun triggerAiTurn() {
+        stopTurnTimer()
         val currentDifficulty = _uiState.value.difficulty
         _uiState.update {
             it.copy(
@@ -507,174 +697,369 @@ class ScrabbleViewModel : ViewModel() {
         }
 
         viewModelScope.launch {
-            // Natural thinking delay
-            delay(1100)
+            try {
+                // Natural thinking delay
+                delay(1100)
 
-            val state = _uiState.value
-            val aiMove = AiEngine.findAiMove(
-                board = state.board,
-                aiRack = state.aiRack,
-                difficulty = state.difficulty,
-                customSettings = state.customSettings
-            )
-
-            if (aiMove != null && aiMove.scoreResult.isValid) {
-                val wordPlayed = aiMove.scoreResult.primaryWord?.word ?: "WORD"
-                val pointsEarned = aiMove.scoreResult.totalScore
-                val newAiScore = state.aiScore + pointsEarned
-
-                // Sort placements in natural reading order (top-to-bottom, left-to-right)
-                val sortedPlacements = aiMove.placements.sortedWith(compareBy({ it.row }, { it.col }))
-                val accumulatedAiCells = mutableSetOf<Pair<Int, Int>>()
-
-                // Animate placing tiles one by one with a slow, visually pleasing cadence
-                for (placed in sortedPlacements) {
-                    accumulatedAiCells.add(placed.row to placed.col)
-
-                    val currentBoard = _uiState.value.board
-                    val stepBoard = Array(ScrabbleEngine.BOARD_SIZE) { r ->
-                        Array(ScrabbleEngine.BOARD_SIZE) { c ->
-                            if (r == placed.row && c == placed.col) {
-                                currentBoard[r][c].copy(tile = placed.tile)
-                            } else {
-                                currentBoard[r][c]
-                            }
-                        }
-                    }
-
-                    _uiState.update {
-                        it.copy(
-                            board = stepBoard,
-                            lastMoveCells = accumulatedAiCells.toSet(),
-                            messageToast = "${state.difficulty.botName} placing '${placed.tile.displayLetter}' in $wordPlayed..."
-                        )
-                    }
-
-                    // Pacing delay per letter placement
-                    delay(520)
-                }
-
-                // Replenish AI rack
-                val newAiRack = state.aiRack.toMutableList()
-                aiMove.placements.forEach { placed ->
-                    val idx = newAiRack.indexOfFirst {
-                        (placed.tile.isBlank && it.isBlank) || (!placed.tile.isBlank && it.letter == placed.tile.letter)
-                    }
-                    if (idx >= 0) newAiRack.removeAt(idx)
-                }
-                val drawn = ScrabbleEngine.drawTiles(tileBag, 7 - newAiRack.size)
-                newAiRack.addAll(drawn)
-
-                val logEntry = GameLogEntry(
-                    turnNumber = state.moveLogs.size + 1,
-                    isPlayer = false,
-                    word = wordPlayed,
-                    points = pointsEarned,
-                    description = "${state.difficulty.botName} played \"$wordPlayed\" for $pointsEarned pts"
+                val state = _uiState.value
+                val aiMove = AiEngine.findAiMove(
+                    board = state.board,
+                    aiRack = state.aiRack,
+                    difficulty = state.difficulty,
+                    customSettings = state.customSettings
                 )
 
-                val allAiCells = aiMove.placements.map { it.row to it.col }.toSet()
+                if (aiMove != null && aiMove.scoreResult.isValid) {
+                    val allWords = aiMove.scoreResult.allWords
+                    val wordPlayed = aiMove.scoreResult.primaryWord?.word
+                        ?: aiMove.scoreResult.crossWords.maxByOrNull { it.points }?.word
+                        ?: aiMove.scoreResult.crossWords.firstOrNull()?.word
+                        ?: "WORD"
+                    val secondaryWords = allWords.map { it.word }.filter { it != wordPlayed }
+                    val allFormedWords = allWords.map { it.word }
+                    val pointsEarned = aiMove.scoreResult.totalScore
+                    val newAiScore = state.aiScore + pointsEarned
+                    val newAiTurnCount = state.aiTurnCount + 1
 
-                // Highlight full word completion before handing turn back
-                _uiState.update {
-                    it.copy(
-                        lastMoveCells = allAiCells,
-                        messageToast = "✨ ${state.difficulty.botName} completed $wordPlayed (+$pointsEarned pts)!"
-                    )
-                }
+                    // Sort placements in natural reading order (top-to-bottom, left-to-right)
+                    val sortedPlacements = aiMove.placements.sortedWith(compareBy({ it.row }, { it.col }))
+                    val accumulatedAiCells = mutableSetOf<Pair<Int, Int>>()
 
-                // Visual appreciation pause for completed word and score
-                delay(850)
+                    // Animate placing tiles one by one with a slow, visually pleasing cadence
+                    for (placed in sortedPlacements) {
+                        accumulatedAiCells.add(placed.row to placed.col)
 
-                _uiState.update {
-                    it.copy(
-                        aiRack = newAiRack,
-                        tileBagCount = tileBag.size,
-                        aiScore = newAiScore,
-                        isAiThinking = false,
-                        isPlayerTurn = true,
-                        lastMoveCells = allAiCells,
-                        moveLogs = listOf(logEntry) + it.moveLogs,
-                        consecutivePasses = 0,
-                        messageToast = "${state.difficulty.botName} played $wordPlayed (+$pointsEarned pts)"
-                    )
-                }
+                        val currentBoard = _uiState.value.board
+                        val stepBoard = Array(ScrabbleEngine.BOARD_SIZE) { r ->
+                            Array(ScrabbleEngine.BOARD_SIZE) { c ->
+                                if (r == placed.row && c == placed.col) {
+                                    currentBoard[r][c].copy(tile = placed.tile)
+                                } else {
+                                    currentBoard[r][c]
+                                }
+                            }
+                        }
 
-                if (newAiRack.isEmpty() && tileBag.isEmpty()) {
-                    endGame()
-                }
-            } else {
-                // AI Passes or Swaps
-                if (tileBag.size >= 3) {
-                    // AI Swaps
-                    _uiState.update {
-                        it.copy(messageToast = "${state.difficulty.botName} is exchanging tiles...")
+                        _uiState.update {
+                            it.copy(
+                                board = stepBoard,
+                                lastMoveCells = accumulatedAiCells.toSet(),
+                                messageToast = "${state.difficulty.botName} placing '${placed.tile.displayLetter}' in $wordPlayed..."
+                            )
+                        }
+
+                        // Pacing delay per letter placement
+                        delay(520)
                     }
-                    delay(800)
 
-                    val toSwap = state.aiRack.take(3)
-                    val newAiRack = state.aiRack.drop(3).toMutableList()
-                    tileBag.addAll(toSwap)
-                    tileBag.shuffle()
-                    val drawn = ScrabbleEngine.drawTiles(tileBag, 3)
+                    // Replenish AI rack
+                    val newAiRack = state.aiRack.toMutableList()
+                    aiMove.placements.forEach { placed ->
+                        val idx = newAiRack.indexOfFirst {
+                            (placed.tile.isBlank && it.isBlank) || (!placed.tile.isBlank && it.letter == placed.tile.letter)
+                        }
+                        if (idx >= 0) newAiRack.removeAt(idx)
+                    }
+                    val drawn = ScrabbleEngine.drawTiles(tileBag, 7 - newAiRack.size)
                     newAiRack.addAll(drawn)
+
+                    val allAiCells = aiMove.placements.map { it.row to it.col }.toSet()
+                    val fullSpanCells = computeWordSpanCells(allWords).ifEmpty { allAiCells }
 
                     val logEntry = GameLogEntry(
                         turnNumber = state.moveLogs.size + 1,
                         isPlayer = false,
-                        word = "",
-                        points = 0,
-                        description = "${state.difficulty.botName} swapped 3 tiles",
-                        isPassOrSwap = true
+                        word = wordPlayed,
+                        points = pointsEarned,
+                        description = "${state.difficulty.botName} played \"$wordPlayed\" for $pointsEarned pts",
+                        secondaryWords = secondaryWords,
+                        placedCoordinates = allAiCells,
+                        allFormedWords = allFormedWords
                     )
+
+                    // Highlight full word completion before handing turn back
+                    _uiState.update {
+                        it.copy(
+                            lastMoveCells = allAiCells,
+                            lastWordSpanCells = fullSpanCells,
+                            lastPlayedWord = wordPlayed,
+                            lastPlayedScore = pointsEarned,
+                            lastPlayedIsPlayer = false,
+                            aiTurnCount = newAiTurnCount,
+                            messageToast = "✨ ${state.difficulty.botName} completed \"$wordPlayed\" (+$pointsEarned pts)!"
+                        )
+                    }
+
+                    // Visual appreciation pause for completed word and score
+                    delay(850)
 
                     _uiState.update {
                         it.copy(
                             aiRack = newAiRack,
                             tileBagCount = tileBag.size,
+                            aiScore = newAiScore,
                             isAiThinking = false,
                             isPlayerTurn = true,
-                            consecutivePasses = 0,
+                            lastMoveCells = allAiCells,
+                            lastWordSpanCells = fullSpanCells,
                             moveLogs = listOf(logEntry) + it.moveLogs,
-                            messageToast = "${state.difficulty.botName} swapped 3 tiles"
+                            consecutivePasses = 0,
+                            messageToast = "${state.difficulty.botName} played \"$wordPlayed\" (+$pointsEarned pts)"
                         )
+                    }
+
+                    if (checkWinConditions(state.playerScore, newAiScore, state.playerTurnCount, newAiTurnCount, state.playerRack.isEmpty())) {
+                        return@launch
                     }
                 } else {
-                    // AI Passes
-                    _uiState.update {
-                        it.copy(messageToast = "${state.difficulty.botName} is considering options...")
-                    }
-                    delay(800)
+                    // AI Passes or Swaps
+                    val newAiTurnCount = state.aiTurnCount + 1
+                    if (tileBag.size >= 3) {
+                        // AI Swaps
+                        _uiState.update {
+                            it.copy(messageToast = "${state.difficulty.botName} is exchanging tiles...")
+                        }
+                        delay(800)
 
-                    val newPasses = state.consecutivePasses + 1
-                    val logEntry = GameLogEntry(
-                        turnNumber = state.moveLogs.size + 1,
-                        isPlayer = false,
-                        word = "",
-                        points = 0,
-                        description = "${state.difficulty.botName} passed turn",
-                        isPassOrSwap = true
-                    )
+                        val toSwap = state.aiRack.take(3)
+                        val newAiRack = state.aiRack.drop(3).toMutableList()
+                        tileBag.addAll(toSwap)
+                        tileBag.shuffle()
+                        val drawn = ScrabbleEngine.drawTiles(tileBag, 3)
+                        newAiRack.addAll(drawn)
 
-                    _uiState.update {
-                        it.copy(
-                            isAiThinking = false,
-                            isPlayerTurn = true,
-                            consecutivePasses = newPasses,
-                            moveLogs = listOf(logEntry) + it.moveLogs,
-                            messageToast = "${state.difficulty.botName} passed turn"
+                        val logEntry = GameLogEntry(
+                            turnNumber = state.moveLogs.size + 1,
+                            isPlayer = false,
+                            word = "",
+                            points = 0,
+                            description = "${state.difficulty.botName} swapped 3 tiles",
+                            isPassOrSwap = true
                         )
-                    }
 
-                    if (newPasses >= 4) {
-                        endGame()
+                        _uiState.update {
+                            it.copy(
+                                aiRack = newAiRack,
+                                tileBagCount = tileBag.size,
+                                aiTurnCount = newAiTurnCount,
+                                isAiThinking = false,
+                                isPlayerTurn = true,
+                                consecutivePasses = 0,
+                                moveLogs = listOf(logEntry) + it.moveLogs,
+                                messageToast = "${state.difficulty.botName} swapped 3 tiles"
+                            )
+                        }
+                    } else {
+                        // AI Passes
+                        _uiState.update {
+                            it.copy(messageToast = "${state.difficulty.botName} is considering options...")
+                        }
+                        delay(800)
+
+                        val newPasses = state.consecutivePasses + 1
+                        val logEntry = GameLogEntry(
+                            turnNumber = state.moveLogs.size + 1,
+                            isPlayer = false,
+                            word = "",
+                            points = 0,
+                            description = "${state.difficulty.botName} passed turn",
+                            isPassOrSwap = true
+                        )
+
+                        _uiState.update {
+                            it.copy(
+                                isAiThinking = false,
+                                isPlayerTurn = true,
+                                aiTurnCount = newAiTurnCount,
+                                consecutivePasses = newPasses,
+                                moveLogs = listOf(logEntry) + it.moveLogs,
+                                messageToast = "${state.difficulty.botName} passed turn"
+                            )
+                        }
+
+                        if (newPasses >= 4 || checkWinConditions(state.playerScore, state.aiScore, state.playerTurnCount, newAiTurnCount, false)) {
+                            endGame()
+                            return@launch
+                        }
                     }
+                }
+                onTurnTransitionToPlayer()
+            } catch (e: Throwable) {
+                logDebugError("AI turn crashed: ${e.message}", e)
+                _uiState.update {
+                    it.copy(
+                        isAiThinking = false,
+                        isPlayerTurn = true,
+                        messageToast = "⚠️ Bot encountered a temporary issue. Your turn."
+                    )
                 }
             }
         }
     }
 
+    fun inspectTileAt(row: Int, col: Int) {
+        wordInspectionDismissJob?.cancel()
+        val state = _uiState.value
+        val cell = state.board[row][col]
+        if (cell.tile == null) {
+            _uiState.update { it.copy(inspectedWordInfo = null) }
+            return
+        }
+
+        // Find horizontal word passing through (row, col)
+        var hStart = col
+        while (hStart > 0 && state.board[row][hStart - 1].tile != null) {
+            hStart--
+        }
+        var hEnd = col
+        while (hEnd < ScrabbleEngine.BOARD_SIZE - 1 && state.board[row][hEnd + 1].tile != null) {
+            hEnd++
+        }
+        val hWord = if (hEnd > hStart) {
+            (hStart..hEnd).map { state.board[row][it].tile!!.displayLetter }.joinToString("")
+        } else null
+
+        // Find vertical word passing through (row, col)
+        var vStart = row
+        while (vStart > 0 && state.board[vStart - 1][col].tile != null) {
+            vStart--
+        }
+        var vEnd = row
+        while (vEnd < ScrabbleEngine.BOARD_SIZE - 1 && state.board[vEnd + 1][col].tile != null) {
+            vEnd++
+        }
+        val vWord = if (vEnd > vStart) {
+            (vStart..vEnd).map { state.board[it][col].tile!!.displayLetter }.joinToString("")
+        } else null
+
+        val chosenWord = hWord ?: vWord
+        if (chosenWord != null) {
+            val coords = if (chosenWord == hWord) {
+                (hStart..hEnd).map { row to it }
+            } else {
+                (vStart..vEnd).map { it to col }
+            }
+            var rawPts = 0
+            for (ch in chosenWord) {
+                rawPts += com.example.game.model.getLetterPoints(ch)
+            }
+            val def = WordDictionary.getDefinition(chosenWord)
+            _uiState.update {
+                it.copy(
+                    inspectedWordInfo = InspectedWordInfo(
+                        word = chosenWord,
+                        totalScore = rawPts,
+                        definition = def,
+                        coordinates = coords
+                    ),
+                    lastMoveCells = coords.toSet(),
+                    lastWordSpanCells = coords.toSet()
+                )
+            }
+
+            // Fetch actual dictionary definition from open Free Dictionary API in the background
+            viewModelScope.launch(Dispatchers.IO) {
+                val onlineDef = fetchOnlineDefinition(chosenWord)
+                if (onlineDef != null) {
+                    val formattedDef = "$onlineDef (Definition retrieved in real-time)."
+                    _uiState.update { current ->
+                        if (current.inspectedWordInfo?.word == chosenWord) {
+                            current.copy(
+                                inspectedWordInfo = current.inspectedWordInfo.copy(definition = formattedDef)
+                            )
+                        } else current
+                    }
+                }
+            }
+        } else {
+            // Single standalone tile or no full word
+            val letter = cell.tile.displayLetter
+            val pts = cell.tile.points
+            _uiState.update {
+                it.copy(
+                    inspectedWordInfo = InspectedWordInfo(
+                        word = letter.toString(),
+                        totalScore = pts,
+                        definition = "Tile '$letter' ($pts pts)",
+                        coordinates = listOf(row to col)
+                    ),
+                    lastMoveCells = setOf(row to col),
+                    lastWordSpanCells = setOf(row to col)
+                )
+            }
+        }
+        wordInspectionDismissJob = viewModelScope.launch {
+            delay(6000)
+            dismissWordInspection()
+        }
+    }
+
+    private fun fetchOnlineDefinition(word: String): String? {
+        return try {
+            val url = java.net.URL("https://api.dictionaryapi.dev/api/v2/entries/en/${word.lowercase()}")
+            val connection = url.openConnection() as java.net.HttpURLConnection
+            connection.requestMethod = "GET"
+            connection.connectTimeout = 3000
+            connection.readTimeout = 3000
+            if (connection.responseCode == 200) {
+                val response = connection.inputStream.bufferedReader().use { it.readText() }
+                val regex = "\"definition\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"".toRegex()
+                val match = regex.find(response)
+                if (match != null) {
+                    match.groupValues[1].replace("\\\"", "\"").replace("\\'", "'")
+                } else {
+                    null
+                }
+            } else {
+                null
+            }
+        } catch (e: Throwable) {
+            null
+        }
+    }
+
+    fun clearInspectedWord() {
+        _uiState.update { it.copy(inspectedWordInfo = null) }
+    }
+
+    fun dismissWordInspection() {
+        clearInspectedWord()
+    }
+
+    fun highlightLogMove(entry: GameLogEntry) {
+        if (entry.placedCoordinates.isNotEmpty()) {
+            _uiState.update {
+                it.copy(
+                    lastMoveCells = entry.placedCoordinates,
+                    lastWordSpanCells = entry.placedCoordinates,
+                    showHistoryDialog = false,
+                    messageToast = "📍 Showing ${if (entry.isPlayer) "Your" else "AI's"} play: ${entry.word} (+${entry.points} pts)"
+                )
+            }
+        }
+    }
+
+    fun highlightMoveFromLog(entry: GameLogEntry) {
+        highlightLogMove(entry)
+    }
+
+    fun concedeOrEndGame() {
+        endGame()
+    }
+
+    fun setWinCondition(type: WinConditionType, target: Int = 150, maxTurns: Int = 12) {
+        _uiState.update {
+            it.copy(
+                winConditionType = type,
+                targetScore = target,
+                maxTurnsPerPlayer = maxTurns,
+                messageToast = "Mode: ${type.title}"
+            )
+        }
+    }
+
     private fun endGame() {
+        stopTurnTimer()
         val state = _uiState.value
         val isWin = state.playerScore > state.aiScore
         val updatedStats = state.stats.copy(
@@ -798,6 +1183,248 @@ class ScrabbleViewModel : ViewModel() {
                 celebrationPoints = 0,
                 celebrationIsBingo = false
             )
+        }
+    }
+
+    // --- Turn Timer Logic ---
+    private fun startTurnTimer() {
+        timerJob?.cancel()
+        val state = _uiState.value
+        if (!state.isTimedModeEnabled || !state.isPlayerTurn || state.isGameOver) {
+            return
+        }
+
+        _uiState.update { it.copy(playerTimeLeftSeconds = it.turnTimeLimitSeconds) }
+
+        timerJob = viewModelScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(1000)
+                val current = _uiState.value
+                if (current.playerTimeLeftSeconds > 1) {
+                    _uiState.update { it.copy(playerTimeLeftSeconds = it.playerTimeLeftSeconds - 1) }
+                } else {
+                    _uiState.update { it.copy(playerTimeLeftSeconds = 0, messageToast = "⏳ Time's up! Your turn passed.") }
+                    onPassTurn()
+                    break
+                }
+            }
+        }
+    }
+
+    private fun stopTurnTimer() {
+        timerJob?.cancel()
+        timerJob = null
+    }
+
+    private fun onTurnTransitionToPlayer() {
+        startTurnTimer()
+    }
+
+    // --- Snap Word Mode Logic ---
+    fun toggleSnapMode() {
+        val state = _uiState.value
+        if (!state.isPlayerTurn || state.isAiThinking) return
+
+        if (state.isSnapModeActive) {
+            cancelSnapMode()
+        } else {
+            val fullPlayerRack = if (state.pendingPlacements.isNotEmpty()) {
+                val restored = state.playerRack.toMutableList()
+                state.pendingPlacements.values.forEach { tile ->
+                    restored.add(tile.copy(assignedLetter = null))
+                }
+                restored
+            } else {
+                state.playerRack
+            }
+
+            _uiState.update {
+                it.copy(
+                    isSnapModeActive = true,
+                    fullRackBeforeSnap = fullPlayerRack,
+                    playerRack = fullPlayerRack,
+                    snapWordTray = fullPlayerRack,
+                    snapSelectedCell = 7 to 7,
+                    snapPreviewIsHorizontal = true,
+                    messageToast = "🧩 Snap Word: Tap tiles to pick only letters you want, then tap starting cell on board!"
+                )
+            }
+            updateSnapPreview(7, 7, true)
+        }
+    }
+
+    fun cancelSnapMode() {
+        val state = _uiState.value
+        val fullRack = if (state.fullRackBeforeSnap.isNotEmpty()) state.fullRackBeforeSnap else state.playerRack
+        _uiState.update {
+            it.copy(
+                isSnapModeActive = false,
+                playerRack = fullRack,
+                fullRackBeforeSnap = emptyList(),
+                snapWordTray = emptyList(),
+                pendingPlacements = emptyMap(),
+                snapSelectedCell = null,
+                validationResult = null,
+                messageToast = "Snap mode cancelled"
+            )
+        }
+    }
+
+    fun onSnapTileToggle(tile: Tile) {
+        val state = _uiState.value
+        if (!state.isSnapModeActive) return
+
+        val currentTray = state.snapWordTray.toMutableList()
+        val existingIndex = currentTray.indexOfFirst { it.id == tile.id }
+        if (existingIndex != -1) {
+            currentTray.removeAt(existingIndex)
+        } else {
+            currentTray.add(tile)
+        }
+        _uiState.update { it.copy(snapWordTray = currentTray) }
+        val cell = state.snapSelectedCell ?: (7 to 7)
+        updateSnapPreview(cell.first, cell.second, state.snapPreviewIsHorizontal)
+    }
+
+    fun snapSelectAll() {
+        val state = _uiState.value
+        if (!state.isSnapModeActive) return
+        val fullRack = if (state.fullRackBeforeSnap.isNotEmpty()) state.fullRackBeforeSnap else state.playerRack
+        _uiState.update { it.copy(snapWordTray = fullRack) }
+        val cell = state.snapSelectedCell ?: (7 to 7)
+        updateSnapPreview(cell.first, cell.second, state.snapPreviewIsHorizontal)
+    }
+
+    fun snapClearSelection() {
+        val state = _uiState.value
+        if (!state.isSnapModeActive) return
+        val fullRack = if (state.fullRackBeforeSnap.isNotEmpty()) state.fullRackBeforeSnap else state.playerRack
+        _uiState.update {
+            it.copy(
+                snapWordTray = emptyList(),
+                pendingPlacements = emptyMap(),
+                playerRack = fullRack,
+                validationResult = null
+            )
+        }
+    }
+
+    fun nudgeSnap(dRow: Int, dCol: Int) {
+        val state = _uiState.value
+        if (!state.isSnapModeActive) return
+        val currentCell = state.snapSelectedCell ?: (7 to 7)
+        val nextRow = (currentCell.first + dRow).coerceIn(0, ScrabbleEngine.BOARD_SIZE - 1)
+        val nextCol = (currentCell.second + dCol).coerceIn(0, ScrabbleEngine.BOARD_SIZE - 1)
+        updateSnapPreview(nextRow, nextCol, state.snapPreviewIsHorizontal)
+    }
+
+    fun updateSnapPreview(row: Int, col: Int, isHorizontal: Boolean) {
+        val state = _uiState.value
+        if (!state.isPlayerTurn || state.isAiThinking || !state.isSnapModeActive) return
+
+        val fullRack = if (state.fullRackBeforeSnap.isNotEmpty()) state.fullRackBeforeSnap else state.playerRack
+        val wordTiles = state.snapWordTray
+
+        if (wordTiles.isEmpty()) {
+            _uiState.update {
+                it.copy(
+                    snapSelectedCell = row to col,
+                    snapPreviewIsHorizontal = isHorizontal,
+                    pendingPlacements = emptyMap(),
+                    playerRack = fullRack,
+                    validationResult = null
+                )
+            }
+            return
+        }
+
+        val tempPending = mutableMapOf<Pair<Int, Int>, Tile>()
+        val tilesToPlace = wordTiles.toMutableList()
+
+        var curRow = row
+        var curCol = col
+        var tileIdx = 0
+
+        while (tileIdx < tilesToPlace.size && curRow in 0 until ScrabbleEngine.BOARD_SIZE && curCol in 0 until ScrabbleEngine.BOARD_SIZE) {
+            val cell = state.board[curRow][curCol]
+            if (cell.tile != null) {
+                // Existing tile on board, pass over it (word bridges through it)
+                if (isHorizontal) curCol++ else curRow++
+            } else {
+                val tile = tilesToPlace[tileIdx]
+                tempPending[curRow to curCol] = tile
+                tileIdx++
+                if (isHorizontal) curCol++ else curRow++
+            }
+        }
+
+        val placedTileIds = tempPending.values.map { it.id }.toSet()
+        val remainingRack = fullRack.filter { it.id !in placedTileIds }
+        val validation = evaluatePendingPlacements(state.board, tempPending)
+
+        _uiState.update {
+            it.copy(
+                snapSelectedCell = row to col,
+                snapPreviewIsHorizontal = isHorizontal,
+                pendingPlacements = tempPending,
+                playerRack = remainingRack,
+                validationResult = validation
+            )
+        }
+    }
+
+    fun confirmSnapPlay() {
+        val state = _uiState.value
+        if (!state.isPlayerTurn || state.isAiThinking || !state.isSnapModeActive) return
+
+        val fullRack = if (state.fullRackBeforeSnap.isNotEmpty()) state.fullRackBeforeSnap else state.playerRack
+        val placedTileIds = state.pendingPlacements.values.map { it.id }.toSet()
+        val remainingRack = fullRack.filter { it.id !in placedTileIds }
+
+        val blankCellWithoutLetter = state.pendingPlacements.entries.firstOrNull {
+            it.value.isBlank && it.value.assignedLetter == null
+        }?.key
+
+        _uiState.update {
+            it.copy(
+                isSnapModeActive = false,
+                playerRack = remainingRack,
+                snapSelectedCell = null,
+                snapWordTray = emptyList(),
+                fullRackBeforeSnap = emptyList(),
+                blankPickerCell = blankCellWithoutLetter,
+                messageToast = if (state.pendingPlacements.isNotEmpty()) "✨ Word placed! Tap PLAY to submit." else "Snap mode closed"
+            )
+        }
+    }
+
+    fun toggleSnapDirection() {
+        val state = _uiState.value
+        val cell = state.snapSelectedCell ?: (7 to 7)
+        updateSnapPreview(cell.first, cell.second, !state.snapPreviewIsHorizontal)
+    }
+
+    fun toggleDebugDialog(visible: Boolean) {
+        _uiState.update { it.copy(showDebugDialog = visible) }
+    }
+
+    // --- Settings / Sound Config ---
+    fun toggleSoundEffects(enabled: Boolean) {
+        GameAudioSynthesizer.isSoundEnabled = enabled
+        _uiState.update { it.copy(isSoundEnabled = enabled) }
+    }
+
+    fun toggleTimedMode(enabled: Boolean, timeLimitSeconds: Int = 120) {
+        _uiState.update {
+            it.copy(
+                isTimedModeEnabled = enabled,
+                turnTimeLimitSeconds = timeLimitSeconds
+            )
+        }
+        if (enabled && _uiState.value.isPlayerTurn) {
+            startTurnTimer()
+        } else {
+            stopTurnTimer()
         }
     }
 }

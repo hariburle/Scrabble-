@@ -32,6 +32,31 @@ data class Tile(
 ) {
     val displayLetter: Char
         get() = if (isBlank && assignedLetter != null) assignedLetter else letter
+
+    val effectiveLetter: Char
+        get() = displayLetter
+}
+
+/**
+ * Inspected word information for dictionary overlay
+ */
+data class InspectedWordInfo(
+    val word: String,
+    val definition: String,
+    val totalScore: Int,
+    val coordinates: List<Pair<Int, Int>> = emptyList()
+)
+
+/**
+ * Game Win Condition Types
+ */
+enum class WinConditionType(
+    val title: String,
+    val description: String
+) {
+    CLASSIC("Classic End Game", "Game finishes when the tile bag is empty and one player clears their rack or no moves can be made."),
+    TARGET_SCORE("Target Score Race", "First player to reach the point target (e.g. 100 or 150 pts) wins immediately."),
+    TURN_LIMIT("Turn Limit Battle", "Play a set number of rounds (e.g. 12 turns each). Highest score wins.")
 }
 
 /**
@@ -365,7 +390,9 @@ data class GameLogEntry(
     val points: Int,
     val description: String,
     val secondaryWords: List<String> = emptyList(),
-    val isPassOrSwap: Boolean = false
+    val isPassOrSwap: Boolean = false,
+    val placedCoordinates: Set<Pair<Int, Int>> = emptySet(),
+    val allFormedWords: List<String> = emptyList()
 )
 
 /**

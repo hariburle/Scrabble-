@@ -241,7 +241,7 @@ object ScrabbleEngine {
                 for (c in startC..endC) {
                     val placed = placementMap[fixedRow to c]
                     val existing = board[fixedRow][c].tile
-                    val tile = placed?.tile ?: existing!!
+                    val tile = placed?.tile ?: existing ?: return MoveScoreResult(isValid = false, errorMessage = "Gap detected in horizontal word span")
                     val letter = tile.displayLetter
                     sb.append(letter)
 
@@ -288,7 +288,7 @@ object ScrabbleEngine {
                     for (r in startR..endR) {
                         val placed = placementMap[r to p.col]
                         val existing = board[r][p.col].tile
-                        val tile = placed?.tile ?: existing!!
+                        val tile = placed?.tile ?: existing ?: continue
                         sb.append(tile.displayLetter)
 
                         if (placed != null) {
@@ -330,7 +330,7 @@ object ScrabbleEngine {
                 for (r in startR..endR) {
                     val placed = placementMap[r to fixedCol]
                     val existing = board[r][fixedCol].tile
-                    val tile = placed?.tile ?: existing!!
+                    val tile = placed?.tile ?: existing ?: return MoveScoreResult(isValid = false, errorMessage = "Gap detected in vertical word span")
                     sb.append(tile.displayLetter)
 
                     if (placed != null) {
@@ -374,7 +374,7 @@ object ScrabbleEngine {
                     for (c in startC..endC) {
                         val placed = placementMap[p.row to c]
                         val existing = board[p.row][c].tile
-                        val tile = placed?.tile ?: existing!!
+                        val tile = placed?.tile ?: existing ?: continue
                         sb.append(tile.displayLetter)
 
                         if (placed != null) {

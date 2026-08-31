@@ -50,6 +50,10 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -75,8 +79,10 @@ import com.example.game.model.Difficulty
 import com.example.game.model.GameLogEntry
 import com.example.game.model.GameStats
 import com.example.game.model.GameThemePalette
+import com.example.game.model.InspectedWordInfo
 import com.example.game.model.ThemeMode
 import com.example.game.model.Tile
+import com.example.game.model.WinConditionType
 
 /**
  * Letter picker for blank tile
@@ -261,6 +267,15 @@ fun DifficultySettingsDialog(
     currentDifficulty: Difficulty,
     customSettings: CustomDifficultySettings,
     palette: GameThemePalette,
+    isSoundEnabled: Boolean,
+    isTimedModeEnabled: Boolean,
+    turnTimeLimitSeconds: Int,
+    winConditionType: WinConditionType = WinConditionType.CLASSIC,
+    targetScore: Int = 100,
+    maxTurnsPerPlayer: Int = 12,
+    onSoundToggle: (Boolean) -> Unit,
+    onTimedModeToggle: (Boolean, Int) -> Unit,
+    onWinConditionChange: (WinConditionType, Int, Int) -> Unit = { _, _, _ -> },
     onSaveDifficulty: (Difficulty, CustomDifficultySettings) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -268,6 +283,9 @@ fun DifficultySettingsDialog(
     var vocabLevel by remember { mutableFloatStateOf(customSettings.vocabularyLevel) }
     var aggressiveness by remember { mutableFloatStateOf(customSettings.aggressiveness) }
     var maxWordLen by remember { mutableIntStateOf(customSettings.maxWordLength) }
+    var selectedWinCondition by remember { mutableStateOf(winConditionType) }
+    var chosenTargetScore by remember { mutableIntStateOf(targetScore) }
+    var chosenMaxTurns by remember { mutableIntStateOf(maxTurnsPerPlayer) }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -400,6 +418,250 @@ fun DifficultySettingsDialog(
                     }
                 }
 
+                // --- Game Win Condition Selector ---
+                Spacer(modifier = Modifier.height(12.dp))
+                HorizontalDivider(color = palette.tileBorder.copy(alpha = 0.3f), thickness = 1.dp)
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text(
+                    text = "🏆 Win Condition Mode",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp,
+                    color = palette.primaryColor
+                )
+                Text(
+                    text = "Choose how matches conclude:",
+                    fontSize = 11.sp,
+                    color = palette.tileTextColor.copy(alpha = 0.7f),
+                    modifier = Modifier.padding(vertical = 2.dp)
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    WinConditionType.values().forEach { mode ->
+                        val isSelected = selectedWinCondition == mode
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    selectedWinCondition = mode
+                                    onWinConditionChange(mode, chosenTargetScore, chosenMaxTurns)
+                                },
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (isSelected) palette.primaryColor.copy(alpha = 0.1f) else palette.tileColor,
+                            border = BorderStroke(
+                                1.dp,
+                                if (isSelected) palette.primaryColor else palette.tileBorder.copy(alpha = 0.5f)
+                            )
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = mode.title,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp,
+                                        color = palette.tileTextColor
+                                    )
+                                    Text(
+                                        text = mode.description,
+                                        fontSize = 10.sp,
+                                        color = palette.tileTextColor.copy(alpha = 0.75f)
+                                    )
+                                }
+                                RadioButton(
+                                    selected = isSelected,
+                                    onClick = {
+                                        selectedWinCondition = mode
+                                        onWinConditionChange(mode, chosenTargetScore, chosenMaxTurns)
+                                    },
+                                    colors = RadioButtonDefaults.colors(selectedColor = palette.primaryColor)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (selectedWinCondition == WinConditionType.TARGET_SCORE) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Target Points:", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = palette.tileTextColor)
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            listOf(100 to "100 pts", 150 to "150 pts", 200 to "200 pts").forEach { (pts, lbl) ->
+                                FilterChip(
+                                    selected = chosenTargetScore == pts,
+                                    onClick = {
+                                        chosenTargetScore = pts
+                                        onWinConditionChange(selectedWinCondition, pts, chosenMaxTurns)
+                                    },
+                                    label = { Text(lbl, fontSize = 11.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = palette.primaryColor,
+                                        selectedLabelColor = Color.White
+                                    )
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (selectedWinCondition == WinConditionType.TURN_LIMIT) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Turns per Player:", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = palette.tileTextColor)
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            listOf(8 to "8 Turns", 12 to "12 Turns", 16 to "16 Turns").forEach { (turns, lbl) ->
+                                FilterChip(
+                                    selected = chosenMaxTurns == turns,
+                                    onClick = {
+                                        chosenMaxTurns = turns
+                                        onWinConditionChange(selectedWinCondition, chosenTargetScore, turns)
+                                    },
+                                    label = { Text(lbl, fontSize = 11.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = palette.primaryColor,
+                                        selectedLabelColor = Color.White
+                                    )
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // --- General Game Settings ---
+                Spacer(modifier = Modifier.height(12.dp))
+                HorizontalDivider(color = palette.tileBorder.copy(alpha = 0.3f), thickness = 1.dp)
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text(
+                    text = "🎮 Game Preferences",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp,
+                    color = palette.primaryColor
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Sound effects switch
+                var soundOn by remember { mutableStateOf(isSoundEnabled) }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Sound Effects",
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 13.sp,
+                            color = palette.tileTextColor
+                        )
+                        Text(
+                            text = "Enable synthesizer chimes and play feedback",
+                            fontSize = 11.sp,
+                            color = palette.tileTextColor.copy(alpha = 0.65f)
+                        )
+                    }
+                    Switch(
+                        checked = soundOn,
+                        onCheckedChange = {
+                            soundOn = it
+                            onSoundToggle(it)
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = palette.primaryColor,
+                            checkedTrackColor = palette.primaryColor.copy(alpha = 0.4f)
+                        )
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                // Timed turn mode settings
+                var timedOn by remember { mutableStateOf(isTimedModeEnabled) }
+                var timeLimitSecs by remember { mutableIntStateOf(turnTimeLimitSeconds) }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Timed Turn Mode",
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 13.sp,
+                            color = palette.tileTextColor
+                        )
+                        Text(
+                            text = "Add pressure with a turn countdown timer",
+                            fontSize = 11.sp,
+                            color = palette.tileTextColor.copy(alpha = 0.65f)
+                        )
+                    }
+                    Switch(
+                        checked = timedOn,
+                        onCheckedChange = {
+                            timedOn = it
+                            onTimedModeToggle(it, timeLimitSecs)
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = palette.primaryColor,
+                            checkedTrackColor = palette.primaryColor.copy(alpha = 0.4f)
+                        )
+                    )
+                }
+
+                if (timedOn) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Turn Time Limit:",
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 12.sp,
+                            color = palette.tileTextColor
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            listOf(60 to "1 Min", 120 to "2 Min", 180 to "3 Min").forEach { (secs, label) ->
+                                val isSelected = timeLimitSecs == secs
+                                FilterChip(
+                                    selected = isSelected,
+                                    onClick = {
+                                        timeLimitSecs = secs
+                                        onTimedModeToggle(true, secs)
+                                    },
+                                    label = { Text(label, fontSize = 11.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = palette.primaryColor,
+                                        selectedLabelColor = Color.White
+                                    )
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
                 DialogCreditsSubtext(palette)
 
                 Spacer(modifier = Modifier.height(12.dp))
@@ -420,6 +682,7 @@ fun DifficultySettingsDialog(
                                 maxWordLength = maxWordLen
                             )
                             onSaveDifficulty(selectedDiff, newCustom)
+                            onWinConditionChange(selectedWinCondition, chosenTargetScore, chosenMaxTurns)
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = palette.primaryColor)
                     ) {
@@ -769,7 +1032,7 @@ private fun ThemeCard(
 fun MoveHistoryDialog(
     logs: List<GameLogEntry>,
     palette: GameThemePalette,
-    onWordClick: (String) -> Unit,
+    onHighlightMove: (GameLogEntry) -> Unit = {},
     onDismiss: () -> Unit
 ) {
     var showChart by remember { mutableStateOf(false) }
@@ -780,7 +1043,7 @@ fun MoveHistoryDialog(
             color = palette.cellBackground,
             border = BorderStroke(1.5.dp, palette.primaryColor),
             shadowElevation = 12.dp,
-            modifier = Modifier.fillMaxWidth().height(460.dp).padding(8.dp)
+            modifier = Modifier.fillMaxWidth().height(490.dp).padding(6.dp)
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Row(
@@ -860,10 +1123,18 @@ fun MoveHistoryDialog(
                     LazyColumn(
                         modifier = Modifier.fillMaxWidth().weight(1f),
                         verticalArrangement = Arrangement.spacedBy(6.dp),
-                        contentPadding = PaddingValues(vertical = 8.dp)
+                        contentPadding = PaddingValues(vertical = 4.dp)
                     ) {
                         items(logs) { log ->
                             Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        if (!log.isPassOrSwap) {
+                                            onHighlightMove(log)
+                                            onDismiss()
+                                        }
+                                    },
                                 shape = RoundedCornerShape(10.dp),
                                 colors = CardDefaults.cardColors(
                                     containerColor = if (log.isPlayer) palette.primaryColor.copy(alpha = 0.08f) else palette.secondaryColor.copy(alpha = 0.08f)
@@ -873,55 +1144,57 @@ fun MoveHistoryDialog(
                                     if (log.isPlayer) palette.primaryColor.copy(alpha = 0.3f) else palette.secondaryColor.copy(alpha = 0.3f)
                                 )
                             ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(10.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(
-                                            text = if (log.isPlayer) "👤" else "🤖",
-                                            fontSize = 18.sp
-                                        )
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Column {
+                                Column(modifier = Modifier.padding(10.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.weight(1f)
+                                        ) {
                                             Text(
-                                                text = if (log.isPassOrSwap) log.description else log.word,
+                                                text = if (log.isPlayer) "👤" else "🤖",
+                                                fontSize = 18.sp
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Column {
+                                                Text(
+                                                    text = if (log.isPassOrSwap) log.description else log.word,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 15.sp,
+                                                    color = palette.tileTextColor
+                                                )
+                                                if (!log.isPassOrSwap) {
+                                                    Text(
+                                                        text = "🎯 Tap to highlight on board",
+                                                        fontSize = 10.sp,
+                                                        color = palette.primaryColor
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = if (log.points > 0) "+${log.points} pts" else "0 pts",
                                                 fontWeight = FontWeight.Bold,
                                                 fontSize = 14.sp,
-                                                color = palette.tileTextColor
+                                                color = if (log.isPlayer) palette.primaryColor else palette.secondaryColor
                                             )
-                                            if (!log.isPassOrSwap) {
-                                                Text(
-                                                    text = "Tap to view definition",
-                                                    fontSize = 10.sp,
-                                                    color = palette.primaryColor
-                                                )
-                                            }
                                         }
                                     }
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
+
+                                    // Secondary words formed
+                                    if (log.secondaryWords.isNotEmpty()) {
+                                        Spacer(modifier = Modifier.height(4.dp))
                                         Text(
-                                            text = if (log.points > 0) "+${log.points} pts" else "0 pts",
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 14.sp,
-                                            color = if (log.isPlayer) palette.primaryColor else palette.secondaryColor
+                                            text = "Cross words: ${log.secondaryWords.joinToString(", ")}",
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = palette.tileTextColor.copy(alpha = 0.7f)
                                         )
-                                        if (!log.isPassOrSwap) {
-                                            IconButton(
-                                                onClick = { onWordClick(log.word) },
-                                                modifier = Modifier.size(24.dp).padding(start = 4.dp)
-                                            ) {
-                                                Icon(
-                                                    Icons.Default.Info,
-                                                    contentDescription = "Definition",
-                                                    tint = palette.primaryColor,
-                                                    modifier = Modifier.size(16.dp)
-                                                )
-                                            }
-                                        }
                                     }
                                 }
                             }
@@ -930,6 +1203,75 @@ fun MoveHistoryDialog(
                 }
                 DialogCreditsSubtext(palette)
             }
+        }
+    }
+}
+
+/**
+ * In-Game Word Inspection Overlay Card
+ */
+@Composable
+fun WordInspectionOverlayCard(
+    wordInfo: InspectedWordInfo,
+    palette: GameThemePalette,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .shadow(6.dp, RoundedCornerShape(14.dp)),
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = palette.cellBackground),
+        border = BorderStroke(1.5.dp, palette.primaryColor)
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_auto_awesome),
+                        contentDescription = null,
+                        tint = palette.secondaryColor,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = wordInfo.word,
+                        fontWeight = FontWeight.Black,
+                        fontSize = 16.sp,
+                        color = palette.primaryColor
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = palette.primaryColor.copy(alpha = 0.15f)
+                    ) {
+                        Text(
+                            text = "${wordInfo.totalScore} pts",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp,
+                            color = palette.primaryColor,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+                IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) {
+                    Icon(Icons.Default.Close, contentDescription = "Close", tint = palette.tileTextColor.copy(alpha = 0.6f))
+                }
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = wordInfo.definition,
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
+                color = palette.tileTextColor.copy(alpha = 0.9f)
+            )
         }
     }
 }

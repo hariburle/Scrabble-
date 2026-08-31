@@ -6,10 +6,12 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.layout.Box
@@ -26,8 +28,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.res.painterResource
 import com.example.R
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -86,12 +92,30 @@ fun PlayerRackView(
     onHint: () -> Unit,
     onPass: () -> Unit,
     modifier: Modifier = Modifier,
-    onRearrange: (fromIndex: Int, toIndex: Int) -> Unit = { _, _ -> }
+    onRearrange: (fromIndex: Int, toIndex: Int) -> Unit = { _, _ -> },
+    isSnapModeActive: Boolean = false,
+    snapSelectedCell: Pair<Int, Int>? = null,
+    snapPreviewIsHorizontal: Boolean = true,
+    snapWordTray: List<Tile> = emptyList(),
+    onSnapToggle: () -> Unit = {},
+    onSnapDirectionToggle: () -> Unit = {},
+    onSnapTileToggle: (Tile) -> Unit = {},
+    onSnapSelectAll: () -> Unit = {},
+    onSnapClearSelection: () -> Unit = {},
+    onNudgeSnap: (dRow: Int, dCol: Int) -> Unit = { _, _ -> },
+    onSnapConfirm: () -> Unit = {},
+    onSnapCancel: () -> Unit = {},
+    onDragStart: (index: Int, tile: Tile, startPosition: Offset) -> Unit = { _, _, _ -> },
+    onDrag: (amount: Offset) -> Unit = {},
+    onDragEnd: () -> Unit = {},
+    onDragStateChanged: (isDragging: Boolean) -> Unit = {},
+    tileSize: androidx.compose.ui.unit.Dp? = null,
+    spacing: androidx.compose.ui.unit.Dp = 5.dp
 ) {
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 6.dp, vertical = 2.dp),
+            .padding(horizontal = 6.dp, vertical = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         RackTileTray(
@@ -99,11 +123,224 @@ fun PlayerRackView(
             selectedTileIndex = selectedTileIndex,
             isPlayerTurn = isPlayerTurn,
             palette = palette,
-            onTileClick = onTileClick,
-            onRearrange = onRearrange
+            onTileClick = if (isSnapModeActive) {
+                { idx ->
+                    val tile = rack.getOrNull(idx)
+                    if (tile != null) onSnapTileToggle(tile)
+                }
+            } else {
+                onTileClick
+            },
+            onRearrange = onRearrange,
+            isSnapModeActive = isSnapModeActive,
+            snapWordTray = snapWordTray,
+            onDragStart = onDragStart,
+            onDrag = onDrag,
+            onDragEnd = onDragEnd,
+            onDragStateChanged = onDragStateChanged,
+            tileSize = tileSize,
+            spacing = spacing
         )
 
-        Spacer(modifier = Modifier.height(6.dp))
+        Spacer(modifier = Modifier.height(12.dp))
+
+        if (isSnapModeActive) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = palette.cellBackground,
+                border = BorderStroke(1.5.dp, palette.primaryColor),
+                shadowElevation = 4.dp
+            ) {
+                Column(modifier = Modifier.padding(10.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("🧩", fontSize = 16.sp)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Column {
+                                Text(
+                                    text = "SNAP WORD MODE",
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 11.sp,
+                                    color = palette.primaryColor,
+                                    letterSpacing = 0.8.sp
+                                )
+                                Text(
+                                    text = if (snapWordTray.isNotEmpty()) {
+                                        "Word: \"${snapWordTray.joinToString("") { it.effectiveLetter.toString() }}\" (${snapWordTray.size} tiles selected)"
+                                    } else {
+                                        "Tap rack tiles below to pick only letters you want"
+                                    },
+                                    fontSize = 10.sp,
+                                    fontWeight = if (snapWordTray.isNotEmpty()) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (snapWordTray.isNotEmpty()) palette.primaryColor else palette.tileTextColor.copy(alpha = 0.8f)
+                                )
+                            }
+                        }
+
+                        // Quick selection & close actions
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Surface(
+                                modifier = Modifier
+                                    .clickable { onSnapClearSelection() }
+                                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                                shape = RoundedCornerShape(6.dp),
+                                color = palette.tileColor,
+                                border = BorderStroke(1.dp, palette.tileBorder.copy(alpha = 0.6f))
+                            ) {
+                                Text(
+                                    "Clear",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = palette.tileTextColor,
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                )
+                            }
+
+                            Surface(
+                                modifier = Modifier
+                                    .clickable { onSnapSelectAll() }
+                                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                                shape = RoundedCornerShape(6.dp),
+                                color = palette.tileColor,
+                                border = BorderStroke(1.dp, palette.tileBorder.copy(alpha = 0.6f))
+                            ) {
+                                Text(
+                                    "All",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = palette.tileTextColor,
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                )
+                            }
+
+                            IconButton(
+                                onClick = onSnapCancel,
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .background(Color.Red.copy(alpha = 0.12f), CircleShape)
+                            ) {
+                                Icon(Icons.Default.Close, contentDescription = "Cancel Snap", tint = Color.Red, modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    }
+
+                    if (snapSelectedCell != null) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            // Direction toggle button
+                            OutlinedButton(
+                                onClick = onSnapDirectionToggle,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.height(34.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp)
+                            ) {
+                                Text(
+                                    text = if (snapPreviewIsHorizontal) "↔ Across" else "↕ Down",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = palette.primaryColor
+                                )
+                            }
+
+                            // Nudge Arrow D-Pad
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Surface(
+                                    modifier = Modifier.size(32.dp).clickable { onNudgeSnap(0, -1) },
+                                    shape = CircleShape,
+                                    color = palette.tileColor,
+                                    border = BorderStroke(1.dp, palette.tileBorder)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Text("◀", fontSize = 12.sp, color = palette.tileTextColor)
+                                    }
+                                }
+                                Surface(
+                                    modifier = Modifier.size(32.dp).clickable { onNudgeSnap(-1, 0) },
+                                    shape = CircleShape,
+                                    color = palette.tileColor,
+                                    border = BorderStroke(1.dp, palette.tileBorder)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Text("▲", fontSize = 12.sp, color = palette.tileTextColor)
+                                    }
+                                }
+                                Surface(
+                                    modifier = Modifier.size(32.dp).clickable { onNudgeSnap(1, 0) },
+                                    shape = CircleShape,
+                                    color = palette.tileColor,
+                                    border = BorderStroke(1.dp, palette.tileBorder)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Text("▼", fontSize = 12.sp, color = palette.tileTextColor)
+                                    }
+                                }
+                                Surface(
+                                    modifier = Modifier.size(32.dp).clickable { onNudgeSnap(0, 1) },
+                                    shape = CircleShape,
+                                    color = palette.tileColor,
+                                    border = BorderStroke(1.dp, palette.tileBorder)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Text("▶", fontSize = 12.sp, color = palette.tileTextColor)
+                                    }
+                                }
+                            }
+
+                            // Snap Confirm
+                            Button(
+                                onClick = onSnapConfirm,
+                                enabled = snapWordTray.isNotEmpty(),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFF2E7D32),
+                                    disabledContainerColor = Color.Gray.copy(alpha = 0.4f)
+                                ),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.height(34.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp)
+                            ) {
+                                Icon(Icons.Default.Check, contentDescription = "Confirm", tint = Color.White, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    "Snap (${snapWordTray.size})",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            }
+                        }
+                    } else {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "👉 Tap any starting cell on the board to position the word",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = palette.secondaryColor
+                        )
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+        }
 
         RackActionButtons(
             rack = rack,
@@ -118,7 +355,9 @@ fun PlayerRackView(
             onSwap = onSwap,
             onHint = onHint,
             onPlayMove = onPlayMove,
-            onPass = onPass
+            onPass = onPass,
+            isSnapModeActive = isSnapModeActive,
+            onSnapToggle = onSnapToggle
         )
     }
 }
@@ -277,10 +516,18 @@ fun RackTileTray(
     modifier: Modifier = Modifier,
     tileSize: Dp? = null,
     spacing: Dp = 5.dp,
-    onRearrange: (fromIndex: Int, toIndex: Int) -> Unit = { _, _ -> }
+    onRearrange: (fromIndex: Int, toIndex: Int) -> Unit = { _, _ -> },
+    isSnapModeActive: Boolean = false,
+    snapWordTray: List<Tile> = emptyList(),
+    onDragStart: (index: Int, tile: Tile, startPosition: Offset) -> Unit = { _, _, _ -> },
+    onDrag: (amount: Offset) -> Unit = {},
+    onDragEnd: () -> Unit = {},
+    onDragStateChanged: (isDragging: Boolean) -> Unit = {}
 ) {
     var draggedIndex by remember { mutableStateOf<Int?>(null) }
-    var dragOffset by remember { mutableFloatStateOf(0f) }
+    var dragOffset by remember { mutableStateOf(Offset.Zero) }
+    var isDraggingGlobally by remember { mutableStateOf(false) }
+    val tilePositions = remember { Array(7) { Offset.Zero } }
 
     BoxWithConstraints(
         modifier = modifier.fillMaxWidth(),
@@ -291,6 +538,7 @@ fun RackTileTray(
 
         val density = LocalDensity.current
         val tileWidthPx = with(density) { calculatedTileSize.toPx() }
+        val tileHeightPx = tileWidthPx
         val spacingPx = with(density) { spacing.toPx() }
         val slotDistance = tileWidthPx + spacingPx
 
@@ -324,49 +572,80 @@ fun RackTileTray(
                     if (tile != null) {
                         val index = i
                         val isBeingDragged = draggedIndex == index
-                        val displayOffset = if (isBeingDragged) dragOffset else 0f
+                        val isCurrentGloballyDragged = isDraggingGlobally && isBeingDragged
+                        val displayOffset = if (isBeingDragged && !isDraggingGlobally) dragOffset.x else 0f
+                        val snapOrderIndex = if (isSnapModeActive) snapWordTray.indexOfFirst { it.id == tile.id } else -1
+                        val isSnapSelected = snapOrderIndex != -1
 
                         Box(
                             modifier = Modifier
+                                .onGloballyPositioned { coordinates ->
+                                    tilePositions[index] = coordinates.positionInRoot()
+                                }
                                 .graphicsLayer {
                                     translationX = displayOffset
-                                    if (isBeingDragged) {
+                                    if (isBeingDragged && !isDraggingGlobally) {
                                         scaleX = 1.15f
                                         scaleY = 1.15f
                                     }
+                                    alpha = if (isCurrentGloballyDragged) 0.2f else 1.0f
                                 }
                                 .pointerInput(index, rack.size) {
                                     detectDragGestures(
-                                        onDragStart = {
-                                            if (isPlayerTurn) {
+                                        onDragStart = { offset ->
+                                            if (isPlayerTurn && !isSnapModeActive) {
                                                 draggedIndex = index
-                                                dragOffset = 0f
+                                                dragOffset = Offset.Zero
+                                                isDraggingGlobally = false
+                                                onDragStateChanged(true)
                                             }
                                         },
                                         onDragEnd = {
+                                            if (isDraggingGlobally) {
+                                                onDragEnd()
+                                            }
                                             draggedIndex = null
-                                            dragOffset = 0f
+                                            dragOffset = Offset.Zero
+                                            isDraggingGlobally = false
+                                            onDragStateChanged(false)
                                         },
                                         onDragCancel = {
+                                            if (isDraggingGlobally) {
+                                                onDragEnd()
+                                            }
                                             draggedIndex = null
-                                            dragOffset = 0f
+                                            dragOffset = Offset.Zero
+                                            isDraggingGlobally = false
+                                            onDragStateChanged(false)
                                         },
                                         onDrag = { change, dragAmount ->
-                                            if (isPlayerTurn) {
+                                            if (isPlayerTurn && !isSnapModeActive) {
                                                 change.consume()
-                                                dragOffset += dragAmount.x
+                                                dragOffset += dragAmount
 
-                                                val currentDragged = draggedIndex
-                                                if (currentDragged != null) {
-                                                    if (dragOffset > slotDistance / 2f && currentDragged < rack.lastIndex) {
-                                                        onRearrange(currentDragged, currentDragged + 1)
-                                                        draggedIndex = currentDragged + 1
-                                                        dragOffset -= slotDistance
-                                                    } else if (dragOffset < -slotDistance / 2f && currentDragged > 0) {
-                                                        onRearrange(currentDragged, currentDragged - 1)
-                                                        draggedIndex = currentDragged - 1
-                                                        dragOffset += slotDistance
+                                                if (!isDraggingGlobally) {
+                                                    // Check if dragging upwards out of the rack
+                                                    if (dragOffset.y < -tileHeightPx * 0.5f) {
+                                                        isDraggingGlobally = true
+                                                        val startPos = tilePositions[index] + dragOffset - Offset(tileWidthPx / 2f, tileHeightPx / 2f)
+                                                        onDragStart(index, tile, startPos)
+                                                    } else {
+                                                        val currentDragged = draggedIndex
+                                                        if (currentDragged != null) {
+                                                            val horizOffset = dragOffset.x
+                                                            if (horizOffset > slotDistance / 2f && currentDragged < rack.lastIndex) {
+                                                                onRearrange(currentDragged, currentDragged + 1)
+                                                                draggedIndex = currentDragged + 1
+                                                                dragOffset = dragOffset.copy(x = horizOffset - slotDistance)
+                                                            } else if (horizOffset < -slotDistance / 2f && currentDragged > 0) {
+                                                                onRearrange(currentDragged, currentDragged - 1)
+                                                                draggedIndex = currentDragged - 1
+                                                                dragOffset = dragOffset.copy(x = horizOffset + slotDistance)
+                                                            }
+                                                        }
                                                     }
+                                                } else {
+                                                    onDrag(dragAmount)
                                                 }
                                             }
                                         }
@@ -377,10 +656,33 @@ fun RackTileTray(
                                 tile = tile,
                                 palette = palette,
                                 size = calculatedTileSize,
-                                isSelected = selectedTileIndex == index,
+                                isSelected = if (isSnapModeActive) isSnapSelected else (selectedTileIndex == index),
                                 isPending = false,
                                 onClick = if (isPlayerTurn && draggedIndex == null) { { onTileClick(index) } } else null
                             )
+
+                            // In Snap Mode, show order badge on selected tiles
+                            if (isSnapModeActive && isSnapSelected) {
+                                Surface(
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .offset(x = 3.dp, y = (-3).dp)
+                                        .size(16.dp),
+                                    shape = CircleShape,
+                                    color = palette.primaryColor,
+                                    border = BorderStroke(1.dp, Color.White),
+                                    shadowElevation = 2.dp
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Text(
+                                            text = "${snapOrderIndex + 1}",
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White
+                                        )
+                                    }
+                                }
+                            }
                         }
                     } else {
                         Box(
@@ -412,15 +714,17 @@ fun RackActionButtons(
     onHint: () -> Unit,
     onPlayMove: () -> Unit,
     onPass: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isSnapModeActive: Boolean = false,
+    onSnapToggle: () -> Unit = {}
 ) {
     val isPlayEnabled = isPlayerTurn && hasPendingPlacements && (validationResult?.isValid == true)
 
     Column(
         modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Row 1: Shuffle, Undo, and Play with LARGER buttons
+        // Row 1: Shuffle, Undo, Snap and Play
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -461,6 +765,28 @@ fun RackActionButtons(
                     contentDescription = "Recall Placed Tiles",
                     tint = if (hasPendingPlacements) palette.secondaryColor else palette.primaryColor.copy(alpha = 0.3f),
                     modifier = Modifier.size(24.dp)
+                )
+            }
+
+            // Snap Mode Toggle
+            IconButton(
+                onClick = onSnapToggle,
+                enabled = isPlayerTurn && rack.isNotEmpty(),
+                modifier = Modifier
+                    .size(52.dp)
+                    .shadow(3.dp, CircleShape)
+                    .background(if (isSnapModeActive) palette.primaryColor else palette.cellBackground, CircleShape)
+                    .border(
+                        width = 1.5.dp,
+                        color = if (isSnapModeActive) palette.primaryColor else palette.tileBorder.copy(alpha = 0.6f),
+                        shape = CircleShape
+                    )
+                    .testTag("snap_mode_button")
+            ) {
+                Text(
+                    text = "🧩",
+                    fontSize = 20.sp,
+                    modifier = Modifier.alpha(if (isPlayerTurn) 1f else 0.4f)
                 )
             }
 

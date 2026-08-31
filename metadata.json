@@ -1,6 +1,6 @@
 {
-  "name": "Scrabble",
-  "description": "A soothing and colorful single-player Scrabble game with customizable AI difficulty levels, real dictionary validation, and a tranquil aesthetic.",
+  "name": "Classic Word Arena",
+  "description": "A soothing and colorful single-player classic word board game with customizable AI difficulty levels, real dictionary validation, and a tranquil aesthetic.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

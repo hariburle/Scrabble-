@@ -5,7 +5,10 @@ import android.media.AudioManager
 import android.media.AudioTrack
 
 object GameAudioSynthesizer {
+    var isSoundEnabled: Boolean = true
+
     fun playChime(frequencies: List<Float>, durationMs: Long = 150) {
+        if (!isSoundEnabled) return
         kotlin.concurrent.thread {
             try {
                 val sampleRate = 44100
@@ -15,18 +18,6 @@ object GameAudioSynthesizer {
                     AudioFormat.ENCODING_PCM_16BIT
                 )
                 
-                val numSamples = (sampleRate * (durationMs / 1000.0f) * frequencies.size).toInt()
-                val bufferSize = maxOf(minBufferSize, numSamples * 2)
-
-                val audioTrack = AudioTrack(
-                    AudioManager.STREAM_MUSIC,
-                    sampleRate,
-                    AudioFormat.CHANNEL_OUT_MONO,
-                    AudioFormat.ENCODING_PCM_16BIT,
-                    bufferSize,
-                    AudioTrack.MODE_STATIC
-                )
-
                 val sampleCount = (sampleRate * (durationMs / 1000.0f)).toInt()
                 val totalSamples = sampleCount * frequencies.size
                 val samples = ShortArray(totalSamples)
@@ -46,13 +37,25 @@ object GameAudioSynthesizer {
                     }
                 }
 
-                audioTrack.write(samples, 0, samples.size)
-                audioTrack.play()
-                Thread.sleep((durationMs * frequencies.size) + 50)
-                audioTrack.stop()
-                audioTrack.release()
-            } catch (e: Exception) {
-                e.printStackTrace()
+                val bufferSize = maxOf(minBufferSize, totalSamples * 2)
+                val audioTrack = AudioTrack(
+                    AudioManager.STREAM_MUSIC,
+                    sampleRate,
+                    AudioFormat.CHANNEL_OUT_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT,
+                    bufferSize,
+                    AudioTrack.MODE_STREAM
+                )
+
+                if (audioTrack.state == AudioTrack.STATE_INITIALIZED) {
+                    audioTrack.play()
+                    audioTrack.write(samples, 0, samples.size)
+                    Thread.sleep((durationMs * frequencies.size) + 100)
+                    try { audioTrack.stop() } catch (t: Throwable) {}
+                    try { audioTrack.release() } catch (t: Throwable) {}
+                }
+            } catch (e: Throwable) {
+                // Completely safe from crashing the thread/JVM
             }
         }
     }

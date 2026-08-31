@@ -2,13 +2,20 @@ package com.example.game.ui.components
 
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
@@ -69,21 +76,46 @@ fun ScrabbleBoardView(
     palette: GameThemePalette,
     onCellClick: (row: Int, col: Int) -> Unit,
     modifier: Modifier = Modifier,
-    hintMove: AiCandidateMove? = null
+    hintMove: AiCandidateMove? = null,
+    wordSpanCells: Set<Pair<Int, Int>> = emptySet(),
+    boardScale: Float = 1.0f,
+    onScaleChanged: (Float) -> Unit = {},
+    boardOffset: Offset = Offset.Zero,
+    onOffsetChanged: (Offset) -> Unit = {},
+    onCellPositioned: (row: Int, col: Int, bounds: androidx.compose.ui.geometry.Rect) -> Unit = { _, _, _ -> },
+    hoveredCell: Pair<Int, Int>? = null
 ) {
-    var scale by remember { mutableFloatStateOf(1.0f) }
-    var offset by remember { mutableStateOf(Offset.Zero) }
+    var scale by remember { mutableFloatStateOf(boardScale) }
+    var offset by remember { mutableStateOf(boardOffset) }
+
+    LaunchedEffect(boardScale) {
+        scale = boardScale
+    }
+    LaunchedEffect(boardOffset) {
+        offset = boardOffset
+    }
+
+    LaunchedEffect(scale) {
+        onScaleChanged(scale)
+    }
+    LaunchedEffect(offset) {
+        onOffsetChanged(offset)
+    }
 
     val infiniteTransition = rememberInfiniteTransition(label = "lastMoveGlow")
     val glowAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.3f,
-        targetValue = 0.85f,
+        initialValue = 0.35f,
+        targetValue = 0.95f,
         animationSpec = infiniteRepeatable(
-            animation = tween(1000),
+            animation = tween(900),
             repeatMode = RepeatMode.Reverse
         ),
         label = "glowAlpha"
     )
+
+    val combinedHighlights = remember(lastMoveCells, wordSpanCells) {
+        if (wordSpanCells.isNotEmpty()) wordSpanCells else lastMoveCells
+    }
 
     val hintPlacementsMap = remember(hintMove) {
         hintMove?.placements?.associate { (it.row to it.col) to it.tile } ?: emptyMap()
@@ -147,6 +179,26 @@ fun ScrabbleBoardView(
                                         }
                                         event.changes.forEach { it.consume() }
                                     }
+                                } else if (pointerCount == 1 && scale > 1.0f) {
+                                    val change = event.changes[0]
+                                    val panChange = change.position - change.previousPosition
+
+                                    if (!pastTouchSlop) {
+                                        pan += panChange
+                                        if (pan.getDistance() > touchSlop) {
+                                            pastTouchSlop = true
+                                        }
+                                    }
+
+                                    if (pastTouchSlop) {
+                                        val boardPx = size.width.toFloat()
+                                        val maxPan = (boardPx * (scale - 1f)) / 2f + (36f * (scale - 1f))
+                                        offset = Offset(
+                                            x = (offset.x + panChange.x).coerceIn(-maxPan, maxPan),
+                                            y = (offset.y + panChange.y).coerceIn(-maxPan, maxPan)
+                                        )
+                                        change.consume()
+                                    }
                                 }
                             }
                         } while (event.changes.any { it.pressed })
@@ -182,7 +234,7 @@ fun ScrabbleBoardView(
                                 val hintTile = hintPlacementsMap[r to c]
                                 val tile = pendingTile ?: cell.tile ?: hintTile
                                 val isSelected = selectedCell == (r to c)
-                                val isLastMove = lastMoveCells.contains(r to c)
+                                val isLastMove = combinedHighlights.contains(r to c)
 
                                 BoardCellView(
                                     cell = cell,
@@ -191,11 +243,25 @@ fun ScrabbleBoardView(
                                     isHint = hintTile != null,
                                     isSelected = isSelected,
                                     isLastMove = isLastMove,
+                                    isHovered = hoveredCell == (r to c),
                                     glowAlpha = glowAlpha,
                                     palette = palette,
                                     cellSize = cellSize,
                                     onClick = { onCellClick(r, c) },
-                                    modifier = Modifier.weight(1f)
+                                    onDoubleTap = {
+                                        if (scale > 1.05f) {
+                                            scale = 1.0f
+                                            offset = Offset.Zero
+                                        } else {
+                                            scale = 2.0f
+                                            offset = Offset.Zero
+                                        }
+                                    },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .onGloballyPositioned { coords ->
+                                            onCellPositioned(r, c, coords.boundsInRoot())
+                                        }
                                 )
                             }
                         }
@@ -264,11 +330,13 @@ fun BoardCellView(
     isHint: Boolean,
     isSelected: Boolean,
     isLastMove: Boolean,
+    isHovered: Boolean = false,
     glowAlpha: Float,
     palette: GameThemePalette,
     cellSize: Dp,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onDoubleTap: () -> Unit = {}
 ) {
     val bgBonusColor = when (cell.bonusType) {
         BonusType.TRIPLE_WORD -> palette.twsColor
@@ -279,20 +347,36 @@ fun BoardCellView(
         BonusType.NONE -> palette.cellBackground
     }
 
+    val scaleFactor by animateFloatAsState(
+        targetValue = if (isHovered) 1.15f else 1.0f,
+        animationSpec = spring(dampingRatio = 0.5f, stiffness = 300f),
+        label = "cellHoverScale"
+    )
+
     Box(
         modifier = modifier
+            .graphicsLayer {
+                scaleX = scaleFactor
+                scaleY = scaleFactor
+            }
             .aspectRatio(1f)
             .padding(0.75.dp)
             .clip(RoundedCornerShape(2.5.dp))
             .background(bgBonusColor)
             .border(
-                width = if (isSelected) 2.dp else if (isLastMove) 1.5.dp else 0.5.dp,
-                color = if (isSelected) palette.secondaryColor
+                width = if (isHovered) 2.5.dp else if (isSelected) 2.dp else if (isLastMove) 1.5.dp else 0.5.dp,
+                color = if (isHovered) Color(0xFFFFD54F)
+                else if (isSelected) palette.secondaryColor
                 else if (isLastMove) palette.secondaryColor.copy(alpha = glowAlpha)
                 else palette.tileBorder.copy(alpha = 0.25f),
                 shape = RoundedCornerShape(2.5.dp)
             )
-            .clickable(onClick = onClick)
+            .pointerInput(onClick, onDoubleTap) {
+                detectTapGestures(
+                    onTap = { onClick() },
+                    onDoubleTap = { onDoubleTap() }
+                )
+            }
             .testTag("cell_${cell.row}_${cell.col}"),
         contentAlignment = Alignment.Center
     ) {

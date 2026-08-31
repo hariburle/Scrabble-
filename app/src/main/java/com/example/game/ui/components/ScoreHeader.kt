@@ -58,7 +58,10 @@ fun ScoreHeader(
     onOpenHistory: () -> Unit,
     onOpenStats: () -> Unit,
     onRestartGame: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isTimedModeEnabled: Boolean = false,
+    playerTimeLeftSeconds: Int = 120,
+    onOpenDebug: () -> Unit = {}
 ) {
     Column(
         modifier = modifier
@@ -72,7 +75,8 @@ fun ScoreHeader(
             onOpenThemes = onOpenThemes,
             onOpenHistory = onOpenHistory,
             onOpenStats = onOpenStats,
-            onRestartGame = onRestartGame
+            onRestartGame = onRestartGame,
+            onOpenDebug = onOpenDebug
         )
 
         Spacer(modifier = Modifier.height(2.dp))
@@ -87,7 +91,9 @@ fun ScoreHeader(
             peeksLeft = peeksLeft,
             isPeeking = isPeeking,
             aiRack = aiRack,
-            onPeekClick = onPeekClick
+            onPeekClick = onPeekClick,
+            isTimedModeEnabled = isTimedModeEnabled,
+            playerTimeLeftSeconds = playerTimeLeftSeconds
         )
     }
 }
@@ -101,7 +107,8 @@ fun ScrabbleTopAppBar(
     onOpenHistory: () -> Unit,
     onOpenStats: () -> Unit,
     onRestartGame: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onOpenDebug: () -> Unit = {}
 ) {
     Row(
         modifier = modifier.fillMaxWidth(),
@@ -113,7 +120,8 @@ fun ScrabbleTopAppBar(
             Surface(
                 shape = RoundedCornerShape(8.dp),
                 color = palette.primaryColor,
-                shadowElevation = 2.dp
+                shadowElevation = 2.dp,
+                modifier = Modifier.clickable { onOpenDebug() }.testTag("debug_title_trigger")
             ) {
                 Text(
                     text = "SCRABBLE",
@@ -221,7 +229,9 @@ fun ScrabbleScoreCards(
     isPeeking: Boolean,
     aiRack: List<Tile>,
     onPeekClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isTimedModeEnabled: Boolean = false,
+    playerTimeLeftSeconds: Int = 120
 ) {
     Row(
         modifier = modifier.fillMaxWidth(),
@@ -268,15 +278,32 @@ fun ScrabbleScoreCards(
                                 Box(
                                     modifier = Modifier
                                         .size(6.dp)
-                                        .background(Color(0xFF2E7D32), CircleShape)
+                                        .background(if (isTimedModeEnabled && playerTimeLeftSeconds < 30) Color.Red else Color(0xFF2E7D32), CircleShape)
                                 )
                             }
                         }
+                        
+                        val timerLabel = if (isPlayerTurn && isTimedModeEnabled) {
+                            val mins = playerTimeLeftSeconds / 60
+                            val secs = playerTimeLeftSeconds % 60
+                            "Your Turn (${String.format("%02d:%02d", mins, secs)})"
+                        } else if (isPlayerTurn) {
+                            "Your Turn"
+                        } else {
+                            "Waiting..."
+                        }
+                        
+                        val timerColor = if (isPlayerTurn) {
+                            if (isTimedModeEnabled && playerTimeLeftSeconds < 30) Color.Red else Color(0xFF2E7D32)
+                        } else {
+                            palette.tileTextColor.copy(alpha = 0.6f)
+                        }
+
                         Text(
-                            text = if (isPlayerTurn) "Your Turn" else "Waiting...",
+                            text = timerLabel,
                             fontSize = 9.sp,
                             fontWeight = if (isPlayerTurn) FontWeight.SemiBold else FontWeight.Normal,
-                            color = if (isPlayerTurn) Color(0xFF2E7D32) else palette.tileTextColor.copy(alpha = 0.6f)
+                            color = timerColor
                         )
                     }
                 }

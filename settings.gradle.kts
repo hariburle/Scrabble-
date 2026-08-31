@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "Scrabble"
+rootProject.name = "Classic Word Arena"
 
 include(":app")

@@ -69,7 +69,7 @@ fun CelebrationBanner(
                     )
                     .border(
                         width = 2.dp,
-                        brush = Brush.sweepGradient(
+                        brush = Brush.linearGradient(
                             colors = listOf(
                                 Color(0xFFFFD700), // Pure gold
                                 Color(0xFFFFA500), // Orange
