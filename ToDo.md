@@ -1,0 +1,3 @@
+dragging the letters from tray to the board is not working in the horizontal mode, please make sure everything works as expected in both portrait and landscape mode.
+When playing on my phone game crashes whenever i have a higher score, make the game resilient across different possible scenarios
+When a letter is placed in the wrong place on the board before it is comitted, that coin should be able to drag to a new place.
