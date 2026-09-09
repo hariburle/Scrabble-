@@ -113,6 +113,7 @@ fun ScrabbleScreen(
 
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val density = androidx.compose.ui.platform.LocalDensity.current
 
     var isDraggingTile by remember { mutableStateOf(false) }
     var draggedTileInfo by remember { mutableStateOf<Triple<Int, com.example.game.model.Tile, Offset>?>(null) }
@@ -121,11 +122,12 @@ fun ScrabbleScreen(
     var boardScale by remember { mutableStateOf(1.0f) }
     var boardOffset by remember { mutableStateOf(Offset.Zero) }
 
+    val dragVerticalOffsetPx = with(density) { -48.dp.toPx() }
+
     val hoveredCell = draggedTileInfo?.let { (_, _, pos) ->
-        val halfSizePx = with(LocalDensity.current) { 22.dp.toPx() }
-        val tileCenter = pos + Offset(halfSizePx, halfSizePx)
+        val interactionPoint = pos + Offset(0f, dragVerticalOffsetPx)
         cellBoundsMap.entries.firstOrNull { (_, bounds) ->
-            bounds.contains(tileCenter)
+            bounds.contains(interactionPoint)
         }?.key
     }
 
@@ -172,7 +174,7 @@ fun ScrabbleScreen(
                 // Left Side: Scrabble Board (Maximized square board)
                 Box(
                     modifier = Modifier
-                        .weight(1.15f)
+                        .weight(1.05f)
                         .fillMaxHeight()
                         .padding(end = 6.dp),
                     contentAlignment = Alignment.Center
@@ -193,7 +195,42 @@ fun ScrabbleScreen(
                         onCellPositioned = { r, c, bounds ->
                             cellBoundsMap[r to c] = bounds
                         },
-                        hoveredCell = hoveredCell
+                        hoveredCell = hoveredCell,
+                        onPendingDragStart = { r, c, tile, initialOffset ->
+                            val idx = state.playerRack.indexOfFirst { it.id == tile.id }
+                            if (idx != -1) {
+                                isDraggingTile = true
+                                val cellBounds = cellBoundsMap[r to c]
+                                val startPos = if (cellBounds != null) {
+                                    cellBounds.topLeft + initialOffset
+                                } else {
+                                    Offset.Zero
+                                }
+                                draggedTileInfo = Triple(idx, tile, startPos)
+                            }
+                        },
+                        onPendingDrag = { amount ->
+                            draggedTileInfo = draggedTileInfo?.let {
+                                it.copy(third = it.third + amount)
+                            }
+                        },
+                        onPendingDragEnd = {
+                            val info = draggedTileInfo
+                            if (info != null) {
+                                val (idx, tile, pos) = info
+                                val targetPoint = pos + Offset(0f, dragVerticalOffsetPx)
+                                val droppedCell = cellBoundsMap.entries.firstOrNull { (_, bounds) ->
+                                    bounds.contains(targetPoint)
+                                }?.key
+                                if (droppedCell != null) {
+                                    viewModel.onDropTileOnBoard(idx, droppedCell.first, droppedCell.second)
+                                } else {
+                                    viewModel.recallPendingTile(tile.id)
+                                }
+                            }
+                            isDraggingTile = false
+                            draggedTileInfo = null
+                        }
                     )
                 }
 
@@ -223,7 +260,17 @@ fun ScrabbleScreen(
                             onOpenHistory = { viewModel.setDialogVisible(history = true) },
                             onOpenStats = { viewModel.setDialogVisible(stats = true) },
                             onRestartGame = { viewModel.startNewGame() },
-                            onOpenDebug = { viewModel.toggleDebugDialog(true) }
+                            onOpenDebug = { viewModel.toggleDebugDialog(true) },
+                            isZoomed = boardScale > 1.05f,
+                            onToggleZoom = {
+                                if (boardScale > 1.05f) {
+                                    boardScale = 1.0f
+                                    boardOffset = Offset.Zero
+                                } else {
+                                    boardScale = 1.8f
+                                    boardOffset = Offset.Zero
+                                }
+                            }
                         )
 
                         Spacer(modifier = Modifier.height(3.dp))
@@ -282,6 +329,7 @@ fun ScrabbleScreen(
                             onHint = { viewModel.onGetHint() },
                             onPass = { viewModel.onPassTurn() },
                             onRearrange = { from, to -> viewModel.onRearrangePlayerRack(from, to) },
+                            onRearrangeFinished = { viewModel.onRackDragFinished() },
                             isSnapModeActive = state.isSnapModeActive,
                             snapSelectedCell = state.snapSelectedCell,
                             snapPreviewIsHorizontal = state.snapPreviewIsHorizontal,
@@ -307,13 +355,13 @@ fun ScrabbleScreen(
                                 val info = draggedTileInfo
                                 if (info != null) {
                                     val (idx, tile, pos) = info
-                                    val halfSizePx = with(density) { 19.dp.toPx() }
-                                    val tileCenter = pos + Offset(halfSizePx, halfSizePx)
+                                    val targetPoint = pos + Offset(0f, dragVerticalOffsetPx)
                                     val droppedCell = cellBoundsMap.entries.firstOrNull { (_, bounds) ->
-                                        bounds.contains(tileCenter)
+                                        bounds.contains(targetPoint)
                                     }?.key
                                     if (droppedCell != null) {
-                                        viewModel.onDropTileOnBoard(idx, droppedCell.first, droppedCell.second)
+                                        val currentIdx = state.playerRack.indexOfFirst { it.id == tile.id }.takeIf { it != -1 } ?: idx
+                                        viewModel.onDropTileOnBoard(currentIdx, droppedCell.first, droppedCell.second, tile.id)
                                     }
                                 }
                                 draggedTileInfo = null
@@ -349,7 +397,17 @@ fun ScrabbleScreen(
                     onRestartGame = { viewModel.startNewGame() },
                     isTimedModeEnabled = state.isTimedModeEnabled,
                     playerTimeLeftSeconds = state.playerTimeLeftSeconds,
-                    onOpenDebug = { viewModel.toggleDebugDialog(true) }
+                    onOpenDebug = { viewModel.toggleDebugDialog(true) },
+                    isZoomed = boardScale > 1.05f,
+                    onToggleZoom = {
+                        if (boardScale > 1.05f) {
+                            boardScale = 1.0f
+                            boardOffset = Offset.Zero
+                        } else {
+                            boardScale = 1.8f
+                            boardOffset = Offset.Zero
+                        }
+                    }
                 )
 
                 // Fancy animated banner above the board for high score and nice words
@@ -384,7 +442,42 @@ fun ScrabbleScreen(
                         onCellPositioned = { r, c, bounds ->
                             cellBoundsMap[r to c] = bounds
                         },
-                        hoveredCell = hoveredCell
+                        hoveredCell = hoveredCell,
+                        onPendingDragStart = { r, c, tile, initialOffset ->
+                            val idx = state.playerRack.indexOfFirst { it.id == tile.id }
+                            if (idx != -1) {
+                                isDraggingTile = true
+                                val cellBounds = cellBoundsMap[r to c]
+                                val startPos = if (cellBounds != null) {
+                                    cellBounds.topLeft + initialOffset
+                                } else {
+                                    Offset.Zero
+                                }
+                                draggedTileInfo = Triple(idx, tile, startPos)
+                            }
+                        },
+                        onPendingDrag = { amount ->
+                            draggedTileInfo = draggedTileInfo?.let {
+                                it.copy(third = it.third + amount)
+                            }
+                        },
+                        onPendingDragEnd = {
+                            val info = draggedTileInfo
+                            if (info != null) {
+                                val (idx, tile, pos) = info
+                                val targetPoint = pos + Offset(0f, dragVerticalOffsetPx)
+                                val droppedCell = cellBoundsMap.entries.firstOrNull { (_, bounds) ->
+                                    bounds.contains(targetPoint)
+                                }?.key
+                                if (droppedCell != null) {
+                                    viewModel.onDropTileOnBoard(idx, droppedCell.first, droppedCell.second)
+                                } else {
+                                    viewModel.recallPendingTile(tile.id)
+                                }
+                            }
+                            isDraggingTile = false
+                            draggedTileInfo = null
+                        }
                     )
                 }
 
@@ -438,6 +531,7 @@ fun ScrabbleScreen(
                     onHint = { viewModel.onGetHint() },
                     onPass = { viewModel.onPassTurn() },
                     onRearrange = { from, to -> viewModel.onRearrangePlayerRack(from, to) },
+                    onRearrangeFinished = { viewModel.onRackDragFinished() },
                     isSnapModeActive = state.isSnapModeActive,
                     snapSelectedCell = state.snapSelectedCell,
                     snapPreviewIsHorizontal = state.snapPreviewIsHorizontal,
@@ -463,13 +557,13 @@ fun ScrabbleScreen(
                         val info = draggedTileInfo
                         if (info != null) {
                             val (idx, tile, pos) = info
-                            val halfSizePx = with(density) { 24.dp.toPx() }
-                            val tileCenter = pos + Offset(halfSizePx, halfSizePx)
+                            val targetPoint = pos + Offset(0f, dragVerticalOffsetPx)
                             val droppedCell = cellBoundsMap.entries.firstOrNull { (_, bounds) ->
-                                bounds.contains(tileCenter)
+                                bounds.contains(targetPoint)
                             }?.key
                             if (droppedCell != null) {
-                                viewModel.onDropTileOnBoard(idx, droppedCell.first, droppedCell.second)
+                                val currentIdx = state.playerRack.indexOfFirst { it.id == tile.id }.takeIf { it != -1 } ?: idx
+                                viewModel.onDropTileOnBoard(currentIdx, droppedCell.first, droppedCell.second, tile.id)
                             }
                         }
                         draggedTileInfo = null
@@ -600,8 +694,8 @@ fun ScrabbleScreen(
         }
 
         // Floating Word Definition Overlay Card that floats on top of the entire screen without displacing any view
-        if (state.inspectedWordInfo != null) {
-            val coords = state.inspectedWordInfo!!.coordinates
+        state.inspectedWordInfo?.let { inspectedInfo ->
+            val coords = inspectedInfo.coordinates
             val averageRow = if (coords.isNotEmpty()) coords.map { it.first }.average() else 7.5
             val isTopHalf = averageRow < 7.5
             
@@ -625,7 +719,7 @@ fun ScrabbleScreen(
                 contentAlignment = alignment
             ) {
                 WordInspectionOverlayCard(
-                    wordInfo = state.inspectedWordInfo!!,
+                    wordInfo = inspectedInfo,
                     palette = palette,
                     onDismiss = { viewModel.dismissWordInspection() },
                     modifier = Modifier.widthIn(max = 500.dp)
@@ -643,8 +737,8 @@ fun ScrabbleScreen(
                 modifier = Modifier
                     .offset {
                         androidx.compose.ui.unit.IntOffset(
-                            position.x.coerceAtLeast(0f).toInt(),
-                            position.y.coerceAtLeast(0f).toInt()
+                            (position.x - cellWidthPx / 2f).toInt(),
+                            (position.y + dragVerticalOffsetPx - cellWidthPx / 2f).toInt()
                         )
                     }
                     .size(dragTileSizeDp)

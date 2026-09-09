@@ -146,3 +146,27 @@ dependencies {
   // "ksp"(libs.androidx.room.compiler)
   // "ksp"(libs.moshi.kotlin.codegen)
 }
+
+tasks.register("copyApksToRoot") {
+  dependsOn("packageDebug")
+  val srcFile = layout.buildDirectory.file("outputs/apk/debug/app-debug.apk")
+  val destFile1 = rootProject.layout.projectDirectory.file("app-debug.apk")
+  val destFile2 = rootProject.layout.projectDirectory.file("classic_word_arena.apk")
+
+  inputs.file(srcFile)
+  outputs.files(destFile1, destFile2)
+
+  doLast {
+    val src = srcFile.get().asFile
+    if (src.exists()) {
+      src.copyTo(destFile1.asFile, overwrite = true)
+      src.copyTo(destFile2.asFile, overwrite = true)
+      println("Successfully copied APKs to project root.")
+    }
+  }
+}
+
+tasks.matching { it.name == "assembleDebug" }.configureEach {
+  finalizedBy("copyApksToRoot")
+}
+

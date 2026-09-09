@@ -1,5 +1,10 @@
 package com.example.game.ui.components
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
@@ -16,6 +21,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
@@ -25,12 +31,14 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.res.painterResource
 import com.example.R
@@ -83,7 +91,10 @@ fun ScrabbleBoardView(
     boardOffset: Offset = Offset.Zero,
     onOffsetChanged: (Offset) -> Unit = {},
     onCellPositioned: (row: Int, col: Int, bounds: androidx.compose.ui.geometry.Rect) -> Unit = { _, _, _ -> },
-    hoveredCell: Pair<Int, Int>? = null
+    hoveredCell: Pair<Int, Int>? = null,
+    onPendingDragStart: (row: Int, col: Int, com.example.game.model.Tile, androidx.compose.ui.geometry.Offset) -> Unit = { _, _, _, _ -> },
+    onPendingDrag: (androidx.compose.ui.geometry.Offset) -> Unit = {},
+    onPendingDragEnd: () -> Unit = {}
 ) {
     var scale by remember { mutableFloatStateOf(boardScale) }
     var offset by remember { mutableStateOf(boardOffset) }
@@ -257,10 +268,19 @@ fun ScrabbleBoardView(
                                             offset = Offset.Zero
                                         }
                                     },
+                                    onDragStart = { initialOffset ->
+                                        if (pendingTile != null) {
+                                            onPendingDragStart(r, c, pendingTile, initialOffset)
+                                        }
+                                    },
+                                    onDrag = onPendingDrag,
+                                    onDragEnd = onPendingDragEnd,
                                     modifier = Modifier
                                         .weight(1f)
                                         .onGloballyPositioned { coords ->
-                                            onCellPositioned(r, c, coords.boundsInRoot())
+                                            if (coords.isAttached) {
+                                                onCellPositioned(r, c, coords.boundsInRoot())
+                                            }
                                         }
                                 )
                             }
@@ -269,52 +289,43 @@ fun ScrabbleBoardView(
                 }
             }
 
-            // Quick Zoom Controls Overlay in bottom right
-            Surface(
+            // Floating Reset Zoom Pill ONLY when actively zoomed in (so it never blocks tiles during normal 1.0x play)
+            AnimatedVisibility(
+                visible = scale > 1.01f,
+                enter = fadeIn() + scaleIn(),
+                exit = fadeOut() + scaleOut(),
                 modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(6.dp)
-                    .shadow(3.dp, RoundedCornerShape(20.dp)),
-                shape = RoundedCornerShape(20.dp),
-                color = palette.cellBackground.copy(alpha = 0.88f)
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp)
             ) {
-                Row(
-                    modifier = Modifier.padding(2.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(
-                        onClick = {
-                            scale = (scale + 0.4f).coerceAtMost(3.0f)
-                        },
-                        modifier = Modifier.size(32.dp),
-                        colors = IconButtonDefaults.iconButtonColors(contentColor = palette.primaryColor)
-                    ) {
-                        Icon(painter = painterResource(R.drawable.ic_add), contentDescription = "Zoom In", modifier = Modifier.size(16.dp))
-                    }
-
-                    IconButton(
-                        onClick = {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = palette.primaryColor.copy(alpha = 0.92f),
+                    shadowElevation = 4.dp,
+                    modifier = Modifier
+                        .clickable {
                             scale = 1.0f
                             offset = Offset.Zero
-                        },
-                        modifier = Modifier.size(32.dp),
-                        colors = IconButtonDefaults.iconButtonColors(contentColor = palette.primaryColor)
+                        }
+                        .testTag("reset_zoom_chip")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(painter = painterResource(R.drawable.ic_crop_free), contentDescription = "Reset Zoom", modifier = Modifier.size(16.dp))
-                    }
-
-                    IconButton(
-                        onClick = {
-                            scale = (scale - 0.4f).coerceAtLeast(1.0f)
-                            if (scale <= 1.01f) {
-                                scale = 1.0f
-                                offset = Offset.Zero
-                            }
-                        },
-                        modifier = Modifier.size(32.dp),
-                        colors = IconButtonDefaults.iconButtonColors(contentColor = palette.primaryColor)
-                    ) {
-                        Icon(painter = painterResource(R.drawable.ic_remove), contentDescription = "Zoom Out", modifier = Modifier.size(16.dp))
+                        Icon(
+                            painter = painterResource(R.drawable.ic_crop_free),
+                            contentDescription = "Reset Zoom (1.0x)",
+                            tint = Color.White,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Reset 1.0x",
+                            color = Color.White,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
             }
@@ -336,7 +347,10 @@ fun BoardCellView(
     cellSize: Dp,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    onDoubleTap: () -> Unit = {}
+    onDoubleTap: () -> Unit = {},
+    onDragStart: (androidx.compose.ui.geometry.Offset) -> Unit = {},
+    onDrag: (androidx.compose.ui.geometry.Offset) -> Unit = {},
+    onDragEnd: () -> Unit = {}
 ) {
     val bgBonusColor = when (cell.bonusType) {
         BonusType.TRIPLE_WORD -> palette.twsColor
@@ -353,12 +367,48 @@ fun BoardCellView(
         label = "cellHoverScale"
     )
 
+    val dragModifier = if (isPending && tile != null) {
+        Modifier.pointerInput(tile.id) {
+            var totalDragOffset = Offset.Zero
+            var isGloballyDragging = false
+            detectDragGestures(
+                onDragStart = { offset ->
+                    totalDragOffset = Offset.Zero
+                    isGloballyDragging = false
+                },
+                onDragEnd = {
+                    if (isGloballyDragging) {
+                        onDragEnd()
+                    }
+                },
+                onDragCancel = {
+                    if (isGloballyDragging) {
+                        onDragEnd()
+                    }
+                },
+                onDrag = { change, dragAmount ->
+                    change.consume()
+                    totalDragOffset += dragAmount
+                    if (!isGloballyDragging) {
+                        if (totalDragOffset.getDistance() > 15f) {
+                            isGloballyDragging = true
+                            onDragStart(totalDragOffset)
+                        }
+                    } else {
+                        onDrag(dragAmount)
+                    }
+                }
+            )
+        }
+    } else Modifier
+
     Box(
         modifier = modifier
             .graphicsLayer {
                 scaleX = scaleFactor
                 scaleY = scaleFactor
             }
+            .then(dragModifier)
             .aspectRatio(1f)
             .padding(0.75.dp)
             .clip(RoundedCornerShape(2.5.dp))
@@ -380,6 +430,13 @@ fun BoardCellView(
             .testTag("cell_${cell.row}_${cell.col}"),
         contentAlignment = Alignment.Center
     ) {
+        if (isHovered) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0xFFFFD54F).copy(alpha = 0.3f))
+            )
+        }
         if (tile != null) {
             ScrabbleTileView(
                 tile = tile,

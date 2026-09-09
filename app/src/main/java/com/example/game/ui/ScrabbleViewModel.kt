@@ -158,6 +158,10 @@ class ScrabbleViewModel : ViewModel() {
         startTurnTimer()
     }
 
+    fun setPlayerRackForTesting(tiles: List<com.example.game.model.Tile>) {
+        _uiState.update { it.copy(playerRack = tiles) }
+    }
+
     fun onRackTileClick(index: Int) {
         val current = _uiState.value
         if (!current.isPlayerTurn || current.isAiThinking) return
@@ -249,17 +253,28 @@ class ScrabbleViewModel : ViewModel() {
         }
     }
 
-    fun onDropTileOnBoard(rackIndex: Int, row: Int, col: Int) {
+    fun recallPendingTile(tileId: String) {
+        val entry = _uiState.value.pendingPlacements.entries.firstOrNull { it.value.id == tileId } ?: return
+        onBoardCellClick(entry.key.first, entry.key.second)
+    }
+
+    fun onDropTileOnBoard(rackIndex: Int, row: Int, col: Int, tileId: String? = null) {
         val state = _uiState.value
         if (!state.isPlayerTurn || state.isAiThinking) return
 
         val cell = state.board[row][col]
         if (cell.tile != null || state.pendingPlacements.containsKey(row to col)) return
 
-        if (rackIndex in state.playerRack.indices) {
-            val tileToPlace = state.playerRack[rackIndex]
+        val actualIdx = if (tileId != null) {
+            state.playerRack.indexOfFirst { it.id == tileId }.takeIf { it != -1 } ?: rackIndex
+        } else {
+            rackIndex
+        }
+
+        if (actualIdx in state.playerRack.indices) {
+            val tileToPlace = state.playerRack[actualIdx]
             val newRack = state.playerRack.toMutableList()
-            newRack.removeAt(rackIndex)
+            newRack.removeAt(actualIdx)
 
             if (tileToPlace.isBlank) {
                 val newPending = state.pendingPlacements.toMutableMap()
@@ -984,7 +999,7 @@ class ScrabbleViewModel : ViewModel() {
             hEnd++
         }
         val hWord = if (hEnd > hStart) {
-            (hStart..hEnd).map { state.board[row][it].tile!!.displayLetter }.joinToString("")
+            (hStart..hEnd).mapNotNull { state.board[row][it].tile?.displayLetter }.joinToString("")
         } else null
 
         // Find vertical word passing through (row, col)
@@ -997,7 +1012,7 @@ class ScrabbleViewModel : ViewModel() {
             vEnd++
         }
         val vWord = if (vEnd > vStart) {
-            (vStart..vEnd).map { state.board[it][col].tile!!.displayLetter }.joinToString("")
+            (vStart..vEnd).mapNotNull { state.board[it][col].tile?.displayLetter }.joinToString("")
         } else null
 
         val chosenWord = hWord ?: vWord

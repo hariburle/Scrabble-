@@ -487,25 +487,34 @@ fun DifficultySettingsDialog(
 
                 if (selectedWinCondition == WinConditionType.TARGET_SCORE) {
                     Spacer(modifier = Modifier.height(6.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                    Column(
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Target Points:", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = palette.tileTextColor)
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = "Target Points:",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = palette.tileTextColor,
+                            modifier = Modifier.padding(bottom = 4.dp)
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
                             listOf(100 to "100 pts", 150 to "150 pts", 200 to "200 pts").forEach { (pts, lbl) ->
+                                val isSelected = chosenTargetScore == pts
                                 FilterChip(
-                                    selected = chosenTargetScore == pts,
+                                    selected = isSelected,
                                     onClick = {
                                         chosenTargetScore = pts
                                         onWinConditionChange(selectedWinCondition, pts, chosenMaxTurns)
                                     },
-                                    label = { Text(lbl, fontSize = 11.sp) },
+                                    label = { Text(lbl, fontSize = 11.sp, maxLines = 1) },
                                     colors = FilterChipDefaults.filterChipColors(
                                         selectedContainerColor = palette.primaryColor,
                                         selectedLabelColor = Color.White
-                                    )
+                                    ),
+                                    modifier = Modifier.weight(1f)
                                 )
                             }
                         }
@@ -514,25 +523,34 @@ fun DifficultySettingsDialog(
 
                 if (selectedWinCondition == WinConditionType.TURN_LIMIT) {
                     Spacer(modifier = Modifier.height(6.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                    Column(
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Turns per Player:", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = palette.tileTextColor)
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = "Turns per Player:",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = palette.tileTextColor,
+                            modifier = Modifier.padding(bottom = 4.dp)
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
                             listOf(8 to "8 Turns", 12 to "12 Turns", 16 to "16 Turns").forEach { (turns, lbl) ->
+                                val isSelected = chosenMaxTurns == turns
                                 FilterChip(
-                                    selected = chosenMaxTurns == turns,
+                                    selected = isSelected,
                                     onClick = {
                                         chosenMaxTurns = turns
                                         onWinConditionChange(selectedWinCondition, chosenTargetScore, turns)
                                     },
-                                    label = { Text(lbl, fontSize = 11.sp) },
+                                    label = { Text(lbl, fontSize = 11.sp, maxLines = 1) },
                                     colors = FilterChipDefaults.filterChipColors(
                                         selectedContainerColor = palette.primaryColor,
                                         selectedLabelColor = Color.White
-                                    )
+                                    ),
+                                    modifier = Modifier.weight(1f)
                                 )
                             }
                         }
@@ -629,18 +647,20 @@ fun DifficultySettingsDialog(
 
                 if (timedOn) {
                     Spacer(modifier = Modifier.height(6.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                    Column(
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
                             text = "Turn Time Limit:",
                             fontWeight = FontWeight.Medium,
                             fontSize = 12.sp,
-                            color = palette.tileTextColor
+                            color = palette.tileTextColor,
+                            modifier = Modifier.padding(bottom = 4.dp)
                         )
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
                             listOf(60 to "1 Min", 120 to "2 Min", 180 to "3 Min").forEach { (secs, label) ->
                                 val isSelected = timeLimitSecs == secs
                                 FilterChip(
@@ -649,11 +669,12 @@ fun DifficultySettingsDialog(
                                         timeLimitSecs = secs
                                         onTimedModeToggle(true, secs)
                                     },
-                                    label = { Text(label, fontSize = 11.sp) },
+                                    label = { Text(label, fontSize = 11.sp, maxLines = 1) },
                                     colors = FilterChipDefaults.filterChipColors(
                                         selectedContainerColor = palette.primaryColor,
                                         selectedLabelColor = Color.White
-                                    )
+                                    ),
+                                    modifier = Modifier.weight(1f)
                                 )
                             }
                         }

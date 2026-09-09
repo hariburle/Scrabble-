@@ -60,7 +60,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
@@ -99,6 +101,7 @@ fun PlayerRackView(
     onPass: () -> Unit,
     modifier: Modifier = Modifier,
     onRearrange: (fromIndex: Int, toIndex: Int) -> Unit = { _, _ -> },
+    onRearrangeFinished: () -> Unit = {},
     isSnapModeActive: Boolean = false,
     snapSelectedCell: Pair<Int, Int>? = null,
     snapPreviewIsHorizontal: Boolean = true,
@@ -139,6 +142,7 @@ fun PlayerRackView(
                 onTileClick
             },
             onRearrange = onRearrange,
+            onRearrangeFinished = onRearrangeFinished,
             isSnapModeActive = isSnapModeActive,
             snapWordTray = snapWordTray,
             onDragStart = onDragStart,
@@ -553,6 +557,7 @@ fun RackTileTray(
     tileSize: Dp? = null,
     spacing: Dp = 5.dp,
     onRearrange: (fromIndex: Int, toIndex: Int) -> Unit = { _, _ -> },
+    onRearrangeFinished: () -> Unit = {},
     isSnapModeActive: Boolean = false,
     snapWordTray: List<Tile> = emptyList(),
     trayWordInfo: TrayWordInfo? = null,
@@ -561,10 +566,24 @@ fun RackTileTray(
     onDragEnd: () -> Unit = {},
     onDragStateChanged: (isDragging: Boolean) -> Unit = {}
 ) {
+    val currentRack by rememberUpdatedState(rack)
+    val currentOnRearrange by rememberUpdatedState(onRearrange)
+    val currentOnRearrangeFinished by rememberUpdatedState(onRearrangeFinished)
+    val currentOnDragStart by rememberUpdatedState(onDragStart)
+    val currentOnDrag by rememberUpdatedState(onDrag)
+    val currentOnDragEnd by rememberUpdatedState(onDragEnd)
+    val currentOnDragStateChanged by rememberUpdatedState(onDragStateChanged)
+
     var draggedTileId by remember { mutableStateOf<String?>(null) }
-    var dragOffset by remember { mutableStateOf(Offset.Zero) }
+    var touchStartInRoot by remember { mutableStateOf(Offset.Zero) }
+    var cumulativeDrag by remember { mutableStateOf(Offset.Zero) }
+    var initialSlotIndex by remember { mutableIntStateOf(-1) }
+    var currentSlotIndex by remember { mutableIntStateOf(-1) }
     var isDraggingGlobally by remember { mutableStateOf(false) }
     val tilePositions = remember { Array(7) { Offset.Zero } }
+
+    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+    val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
 
     BoxWithConstraints(
         modifier = modifier.fillMaxWidth(),
@@ -612,7 +631,11 @@ fun RackTileTray(
                             val index = i
                             val isBeingDragged = (draggedTileId == tile.id)
                             val isCurrentGloballyDragged = isDraggingGlobally && isBeingDragged
-                            val displayOffset = if (isBeingDragged && !isDraggingGlobally) dragOffset.x else 0f
+                            val displayOffset = if (isBeingDragged && !isDraggingGlobally && initialSlotIndex != -1 && currentSlotIndex != -1) {
+                                cumulativeDrag.x - (currentSlotIndex - initialSlotIndex) * slotDistance
+                            } else {
+                                0f
+                            }
                             val snapOrderIndex = if (isSnapModeActive) snapWordTray.indexOfFirst { it.id == tile.id } else -1
                             val isSnapSelected = snapOrderIndex != -1
                             val isTrayWordTile = trayWordInfo != null && selectedTileIndex == null && !isSnapModeActive && index in trayWordInfo.startIndex..trayWordInfo.endIndex
@@ -635,60 +658,74 @@ fun RackTileTray(
                                     }
                                     .pointerInput(tile.id, isPlayerTurn, isSnapModeActive) {
                                         detectDragGestures(
-                                            onDragStart = { offset ->
+                                            onDragStart = { localOffset ->
                                                 if (isPlayerTurn && !isSnapModeActive) {
+                                                    val currentIdx = currentRack.indexOfFirst { it.id == tile.id }
+                                                    val startIdx = if (currentIdx != -1) currentIdx else index
                                                     draggedTileId = tile.id
-                                                    dragOffset = Offset.Zero
+                                                    initialSlotIndex = startIdx
+                                                    currentSlotIndex = startIdx
+                                                    val slotRootPos = tilePositions.getOrElse(startIdx) { Offset.Zero }
+                                                    touchStartInRoot = slotRootPos + localOffset
+                                                    cumulativeDrag = Offset.Zero
                                                     isDraggingGlobally = false
-                                                    onDragStateChanged(true)
+                                                    currentOnDragStateChanged(true)
                                                 }
                                             },
                                             onDragEnd = {
                                                 if (isDraggingGlobally) {
-                                                    onDragEnd()
+                                                    currentOnDragEnd()
+                                                } else if (draggedTileId != null) {
+                                                    currentOnRearrangeFinished()
                                                 }
                                                 draggedTileId = null
-                                                dragOffset = Offset.Zero
+                                                initialSlotIndex = -1
+                                                currentSlotIndex = -1
+                                                cumulativeDrag = Offset.Zero
+                                                touchStartInRoot = Offset.Zero
                                                 isDraggingGlobally = false
-                                                onDragStateChanged(false)
+                                                currentOnDragStateChanged(false)
                                             },
                                             onDragCancel = {
                                                 if (isDraggingGlobally) {
-                                                    onDragEnd()
+                                                    currentOnDragEnd()
+                                                } else if (draggedTileId != null) {
+                                                    currentOnRearrangeFinished()
                                                 }
                                                 draggedTileId = null
-                                                dragOffset = Offset.Zero
+                                                initialSlotIndex = -1
+                                                currentSlotIndex = -1
+                                                cumulativeDrag = Offset.Zero
+                                                touchStartInRoot = Offset.Zero
                                                 isDraggingGlobally = false
-                                                onDragStateChanged(false)
+                                                currentOnDragStateChanged(false)
                                             },
                                             onDrag = { change, dragAmount ->
                                                 if (isPlayerTurn && !isSnapModeActive && draggedTileId == tile.id) {
                                                     change.consume()
-                                                    dragOffset += dragAmount
+                                                    cumulativeDrag += dragAmount
 
                                                     if (!isDraggingGlobally) {
-                                                        // Check if dragging upwards out of the rack
-                                                        if (dragOffset.y < -tileHeightPx * 0.4f) {
-                                                            isDraggingGlobally = true
-                                                            val currentIdx = rack.indexOfFirst { it.id == tile.id }
-                                                            val validIdx = if (currentIdx != -1) currentIdx else index
-                                                            val startPos = tilePositions.getOrElse(validIdx) { Offset.Zero } + dragOffset - Offset(tileWidthPx / 2f, tileHeightPx / 2f)
-                                                            onDragStart(validIdx, tile, startPos)
+                                                        val slotShift = kotlin.math.round(cumulativeDrag.x / slotDistance).toInt()
+                                                        val isDraggingOffTray = if (isLandscape) {
+                                                            cumulativeDrag.y < -tileHeightPx * 0.35f || (initialSlotIndex + slotShift < 0 && cumulativeDrag.x < -slotDistance * 0.4f)
                                                         } else {
-                                                            val currentIdx = rack.indexOfFirst { it.id == tile.id }
-                                                            if (currentIdx != -1) {
-                                                                val horizOffset = dragOffset.x
-                                                                if (horizOffset > slotDistance * 0.5f && currentIdx < rack.lastIndex) {
-                                                                    onRearrange(currentIdx, currentIdx + 1)
-                                                                    dragOffset = Offset.Zero
-                                                                } else if (horizOffset < -slotDistance * 0.5f && currentIdx > 0) {
-                                                                    onRearrange(currentIdx, currentIdx - 1)
-                                                                    dragOffset = Offset.Zero
-                                                                }
+                                                            cumulativeDrag.y < -tileHeightPx * 0.35f
+                                                        }
+
+                                                        if (isDraggingOffTray) {
+                                                            isDraggingGlobally = true
+                                                            val currentTouchPoint = touchStartInRoot + cumulativeDrag
+                                                            currentOnDragStart(currentSlotIndex, tile, currentTouchPoint)
+                                                        } else {
+                                                            val targetSlot = (initialSlotIndex + slotShift).coerceIn(0, currentRack.lastIndex)
+                                                            if (targetSlot != currentSlotIndex && targetSlot in currentRack.indices) {
+                                                                currentOnRearrange(currentSlotIndex, targetSlot)
+                                                                currentSlotIndex = targetSlot
                                                             }
                                                         }
                                                     } else {
-                                                        onDrag(dragAmount)
+                                                        currentOnDrag(dragAmount)
                                                     }
                                                 }
                                             }

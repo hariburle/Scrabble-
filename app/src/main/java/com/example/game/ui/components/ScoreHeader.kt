@@ -61,7 +61,9 @@ fun ScoreHeader(
     modifier: Modifier = Modifier,
     isTimedModeEnabled: Boolean = false,
     playerTimeLeftSeconds: Int = 120,
-    onOpenDebug: () -> Unit = {}
+    onOpenDebug: () -> Unit = {},
+    isZoomed: Boolean = false,
+    onToggleZoom: (() -> Unit)? = null
 ) {
     Column(
         modifier = modifier
@@ -76,7 +78,9 @@ fun ScoreHeader(
             onOpenHistory = onOpenHistory,
             onOpenStats = onOpenStats,
             onRestartGame = onRestartGame,
-            onOpenDebug = onOpenDebug
+            onOpenDebug = onOpenDebug,
+            isZoomed = isZoomed,
+            onToggleZoom = onToggleZoom
         )
 
         Spacer(modifier = Modifier.height(2.dp))
@@ -108,7 +112,9 @@ fun ScrabbleTopAppBar(
     onOpenStats: () -> Unit,
     onRestartGame: () -> Unit,
     modifier: Modifier = Modifier,
-    onOpenDebug: () -> Unit = {}
+    onOpenDebug: () -> Unit = {},
+    isZoomed: Boolean = false,
+    onToggleZoom: (() -> Unit)? = null
 ) {
     Row(
         modifier = modifier.fillMaxWidth(),
@@ -154,6 +160,20 @@ fun ScrabbleTopAppBar(
             horizontalArrangement = Arrangement.spacedBy(1.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            if (onToggleZoom != null) {
+                IconButton(
+                    onClick = onToggleZoom,
+                    modifier = Modifier.size(34.dp).testTag("zoom_button")
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_crop_free),
+                        contentDescription = if (isZoomed) "Reset Zoom (1.0x)" else "Zoom In",
+                        tint = if (isZoomed) palette.secondaryColor else palette.primaryColor,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+
             IconButton(
                 onClick = onOpenThemes,
                 modifier = Modifier.size(34.dp).testTag("theme_button")
