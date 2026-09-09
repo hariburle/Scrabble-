@@ -45,25 +45,25 @@ fun ScrabbleTileView(
     isPending: Boolean = false,
     isLastMove: Boolean = false,
     isHint: Boolean = false,
+    isTrayWordTile: Boolean = false,
     onBoard: Boolean = false,
     onClick: (() -> Unit)? = null
 ) {
     val isCommittedBoardTile = onBoard && !isPending && !isHint
 
     val scale by animateFloatAsState(
-        targetValue = if (isSelected) 1.08f else if (isLastMove) 1.04f else 1.0f,
+        targetValue = if (isSelected) 1.08f else if (isTrayWordTile) 1.04f else if (isLastMove) 1.04f else 1.0f,
         animationSpec = spring(dampingRatio = 0.65f, stiffness = 380f),
         label = "tileScale"
     )
 
-    val elevation = if (isSelected) 8.dp else if (isPending) 4.dp else if (isLastMove) 4.dp else if (isHint) 0.dp else 2.dp
+    val elevation = if (isSelected) 8.dp else if (isTrayWordTile) 5.dp else if (isPending) 4.dp else if (isLastMove) 4.dp else if (isHint) 0.dp else 2.dp
 
     Box(
         modifier = modifier
             .size(size)
             .scale(scale)
             .shadow(elevation, RoundedCornerShape(6.dp))
-            .clip(RoundedCornerShape(6.dp))
             .background(
                 brush = Brush.verticalGradient(
                     colors = if (isHint) {
@@ -102,11 +102,13 @@ fun ScrabbleTileView(
                             )
                         )
                     }
-                )
+                ),
+                shape = RoundedCornerShape(6.dp)
             )
             .border(
-                width = if (isSelected) 2.dp else if (isPending) 1.5.dp else if (isLastMove) 2.dp else if (isHint) 1.5.dp else 1.dp,
+                width = if (isSelected) 2.5.dp else if (isTrayWordTile) 2.dp else if (isPending) 1.5.dp else if (isLastMove) 2.dp else if (isHint) 1.5.dp else 1.dp,
                 color = if (isSelected) palette.secondaryColor 
+                        else if (isTrayWordTile) Color(0xFFFFB300) // Golden amber glow for tray word
                         else if (isPending) palette.primaryColor 
                         else if (isLastMove) Color(0xFFE65100) 
                         else if (isHint) Color(0xFFFFB300).copy(alpha = 0.8f)

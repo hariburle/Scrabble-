@@ -18,6 +18,7 @@ import com.example.game.model.ThemeMode
 import com.example.game.model.Tile
 import com.example.game.model.WinConditionType
 import com.example.game.model.InspectedWordInfo
+import com.example.game.model.TrayWordInfo
 import com.example.game.ui.components.GameAudioSynthesizer
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
@@ -69,6 +70,7 @@ data class ScrabbleUiState(
     val showGameOverDialog: Boolean = false,
     val definitionWord: String? = null,
     val inspectedWordInfo: InspectedWordInfo? = null,
+    val trayWordInfo: TrayWordInfo? = null,
     val hintMove: AiCandidateMove? = null,
     val messageToast: String? = null,
     val hintsLeft: Int = 3,
@@ -118,6 +120,7 @@ class ScrabbleViewModel : ViewModel() {
             current.copy(
                 board = emptyBoard,
                 playerRack = playerInitialRack,
+                trayWordInfo = computeTrayWordInfo(playerInitialRack),
                 aiRack = aiInitialRack,
                 tileBagCount = tileBag.size,
                 playerScore = 0,
@@ -192,7 +195,8 @@ class ScrabbleViewModel : ViewModel() {
                     playerRack = newRack,
                     pendingPlacements = newPending,
                     validationResult = validation,
-                    selectedBoardCell = null
+                    selectedBoardCell = null,
+                    trayWordInfo = computeTrayWordInfo(newRack, newPending.isNotEmpty())
                 )
             }
             return
@@ -237,7 +241,8 @@ class ScrabbleViewModel : ViewModel() {
                         playerRack = newRack,
                         pendingPlacements = newPending,
                         selectedRackIndex = null,
-                        validationResult = validation
+                        validationResult = validation,
+                        trayWordInfo = computeTrayWordInfo(newRack, newPending.isNotEmpty())
                     )
                 }
             }
@@ -264,7 +269,8 @@ class ScrabbleViewModel : ViewModel() {
                         playerRack = newRack,
                         pendingPlacements = newPending,
                         selectedRackIndex = null,
-                        blankPickerCell = row to col
+                        blankPickerCell = row to col,
+                        trayWordInfo = computeTrayWordInfo(newRack, newPending.isNotEmpty())
                     )
                 }
             } else {
@@ -276,7 +282,8 @@ class ScrabbleViewModel : ViewModel() {
                         playerRack = newRack,
                         pendingPlacements = newPending,
                         selectedRackIndex = null,
-                        validationResult = validation
+                        validationResult = validation,
+                        trayWordInfo = computeTrayWordInfo(newRack, newPending.isNotEmpty())
                     )
                 }
             }
@@ -320,14 +327,19 @@ class ScrabbleViewModel : ViewModel() {
                 playerRack = newRack,
                 pendingPlacements = emptyMap(),
                 selectedRackIndex = null,
-                validationResult = null
+                validationResult = null,
+                trayWordInfo = computeTrayWordInfo(newRack)
             )
         }
     }
 
     fun onShuffleRack() {
         _uiState.update {
-            it.copy(playerRack = it.playerRack.shuffled())
+            val shuffled = it.playerRack.shuffled()
+            it.copy(
+                playerRack = shuffled,
+                trayWordInfo = computeTrayWordInfo(shuffled)
+            )
         }
     }
 
@@ -355,10 +367,66 @@ class ScrabbleViewModel : ViewModel() {
                 }
                 it.copy(
                     playerRack = updated,
-                    selectedRackIndex = nextSelected
+                    selectedRackIndex = nextSelected,
+                    trayWordInfo = null // Suppress dictionary validation during motion
                 )
             }
         }
+    }
+
+    fun onRackDragFinished() {
+        _uiState.update {
+            it.copy(
+                trayWordInfo = computeTrayWordInfo(it.playerRack, it.pendingPlacements.isNotEmpty())
+            )
+        }
+    }
+
+    fun computeTrayWordInfo(rack: List<Tile>, hasPendingPlacements: Boolean = false): TrayWordInfo? {
+        if (hasPendingPlacements || rack.size < 2 || !WordDictionary.isInitialized) return null
+
+        var bestWord: TrayWordInfo? = null
+
+        // Search from longest sub-sequence down to 2
+        for (len in rack.size downTo 2) {
+            for (i in 0..(rack.size - len)) {
+                val j = i + len - 1
+                val subList = rack.subList(i, j + 1)
+
+                val unassignedBlankCount = subList.count { it.isBlank && it.assignedLetter == null }
+                if (unassignedBlankCount == 0) {
+                    val str = subList.map { it.displayLetter }.joinToString("").uppercase()
+                    if (WordDictionary.isValidWord(str)) {
+                        val pts = subList.sumOf { it.points }
+                        val info = TrayWordInfo(word = str, totalScore = pts, startIndex = i, endIndex = j)
+                        if (bestWord == null || info.word.length > bestWord.word.length || (info.word.length == bestWord.word.length && info.totalScore > bestWord.totalScore)) {
+                            bestWord = info
+                        }
+                    }
+                } else if (unassignedBlankCount == 1) {
+                    val blankIndex = subList.indexOfFirst { it.isBlank && it.assignedLetter == null }
+                    for (ch in 'A'..'Z') {
+                        val candidateStr = subList.mapIndexed { idx, tile ->
+                            if (idx == blankIndex) ch else tile.displayLetter
+                        }.joinToString("").uppercase()
+
+                        if (WordDictionary.isValidWord(candidateStr)) {
+                            val pts = subList.sumOf { it.points }
+                            val info = TrayWordInfo(word = candidateStr, totalScore = pts, startIndex = i, endIndex = j)
+                            if (bestWord == null || info.word.length > bestWord.word.length || (info.word.length == bestWord.word.length && info.totalScore > bestWord.totalScore)) {
+                                bestWord = info
+                                break
+                            }
+                        }
+                    }
+                }
+            }
+            if (bestWord != null) {
+                return bestWord
+            }
+        }
+
+        return bestWord
     }
 
     private fun computeWordSpanCells(formedWords: List<com.example.game.model.FormedWord>): Set<Pair<Int, Int>> {

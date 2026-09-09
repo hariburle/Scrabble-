@@ -6,6 +6,8 @@ import com.example.game.dictionary.WordDictionary
 import com.example.game.engine.ScrabbleEngine
 import com.example.game.model.PlacedTile
 import com.example.game.model.Tile
+import com.example.game.ui.ScrabbleViewModel
+import org.junit.Assert
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -50,5 +52,26 @@ class ExampleRobolectricTest {
         val scoreResult = ScrabbleEngine.evaluateMove(board, placements, isFirstMove = true)
         assertTrue(scoreResult.isValid)
         assertTrue(scoreResult.totalScore > 0)
+    }
+
+    @Test
+    fun test_tray_word_detection() {
+        WordDictionary.init()
+        val viewModel = ScrabbleViewModel()
+        val rack = listOf(
+            Tile(letter = 'C'),
+            Tile(letter = 'A'),
+            Tile(letter = 'T'),
+            Tile(letter = 'X'),
+            Tile(letter = 'Y'),
+            Tile(letter = 'Z'),
+            Tile(letter = 'S')
+        )
+        val trayWordInfo = viewModel.computeTrayWordInfo(rack)
+        Assert.assertNotNull(trayWordInfo)
+        assertEquals("CAT", trayWordInfo?.word)
+        assertEquals(5, trayWordInfo?.totalScore)
+        assertEquals(0, trayWordInfo?.startIndex)
+        assertEquals(2, trayWordInfo?.endIndex)
     }
 }

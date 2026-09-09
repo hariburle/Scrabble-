@@ -48,6 +48,16 @@ data class InspectedWordInfo(
 )
 
 /**
+ * Information about a valid word formed by contiguous tiles on the player's rack tray
+ */
+data class TrayWordInfo(
+    val word: String,
+    val totalScore: Int,
+    val startIndex: Int,
+    val endIndex: Int
+)
+
+/**
  * Game Win Condition Types
  */
 enum class WinConditionType(

@@ -48,8 +48,10 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
@@ -64,6 +66,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -71,6 +75,7 @@ import androidx.compose.ui.unit.sp
 import com.example.game.model.GameThemePalette
 import com.example.game.model.MoveScoreResult
 import com.example.game.model.Tile
+import com.example.game.model.TrayWordInfo
 
 @Composable
 fun PlayerRackView(
@@ -83,6 +88,7 @@ fun PlayerRackView(
     swapsLeft: Int,
     isAiThinking: Boolean = false,
     statusMessage: String? = null,
+    trayWordInfo: TrayWordInfo? = null,
     palette: GameThemePalette,
     onTileClick: (index: Int) -> Unit,
     onShuffle: () -> Unit,
@@ -123,6 +129,7 @@ fun PlayerRackView(
             selectedTileIndex = selectedTileIndex,
             isPlayerTurn = isPlayerTurn,
             palette = palette,
+            trayWordInfo = trayWordInfo,
             onTileClick = if (isSnapModeActive) {
                 { idx ->
                     val tile = rack.getOrNull(idx)
@@ -370,7 +377,8 @@ fun RackStatusPill(
     isAiThinking: Boolean,
     statusMessage: String?,
     palette: GameThemePalette,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    trayWordInfo: TrayWordInfo? = null
 ) {
     Box(
         modifier = modifier
@@ -465,6 +473,34 @@ fun RackStatusPill(
                         color = palette.primaryColor,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
+                        style = TextStyle(
+                            platformStyle = PlatformTextStyle(includeFontPadding = false)
+                        )
+                    )
+                }
+            }
+        } else if (isPlayerTurn && trayWordInfo != null) {
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = Color(0xFF1B5E20),
+                border = BorderStroke(1.dp, Color(0xFF81C784)),
+                shadowElevation = 3.dp
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        text = "💡",
+                        fontSize = 13.sp
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Tray Spells: \"${trayWordInfo.word}\" (+${trayWordInfo.totalScore} pts)",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp,
                         style = androidx.compose.ui.text.TextStyle(
                             platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false)
                         )
@@ -519,12 +555,13 @@ fun RackTileTray(
     onRearrange: (fromIndex: Int, toIndex: Int) -> Unit = { _, _ -> },
     isSnapModeActive: Boolean = false,
     snapWordTray: List<Tile> = emptyList(),
+    trayWordInfo: TrayWordInfo? = null,
     onDragStart: (index: Int, tile: Tile, startPosition: Offset) -> Unit = { _, _, _ -> },
     onDrag: (amount: Offset) -> Unit = {},
     onDragEnd: () -> Unit = {},
     onDragStateChanged: (isDragging: Boolean) -> Unit = {}
 ) {
-    var draggedIndex by remember { mutableStateOf<Int?>(null) }
+    var draggedTileId by remember { mutableStateOf<String?>(null) }
     var dragOffset by remember { mutableStateOf(Offset.Zero) }
     var isDraggingGlobally by remember { mutableStateOf(false) }
     val tilePositions = remember { Array(7) { Offset.Zero } }
@@ -545,7 +582,6 @@ fun RackTileTray(
         Surface(
             modifier = Modifier
                 .shadow(8.dp, RoundedCornerShape(14.dp))
-                .clip(RoundedCornerShape(14.dp))
                 .background(
                     brush = Brush.verticalGradient(
                         colors = listOf(
@@ -557,11 +593,13 @@ fun RackTileTray(
                                 alpha = 1f
                             )
                         )
-                    )
+                    ),
+                    shape = RoundedCornerShape(14.dp)
                 )
                 .border(2.dp, palette.tileBorder, RoundedCornerShape(14.dp))
-                .padding(horizontal = 8.dp, vertical = 7.dp),
-            color = Color.Transparent
+                .padding(horizontal = 10.dp, vertical = 9.dp),
+            color = Color.Transparent,
+            shape = RoundedCornerShape(14.dp)
         ) {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(spacing),
@@ -570,116 +608,123 @@ fun RackTileTray(
                 for (i in 0 until 7) {
                     val tile = rack.getOrNull(i)
                     if (tile != null) {
-                        val index = i
-                        val isBeingDragged = draggedIndex == index
-                        val isCurrentGloballyDragged = isDraggingGlobally && isBeingDragged
-                        val displayOffset = if (isBeingDragged && !isDraggingGlobally) dragOffset.x else 0f
-                        val snapOrderIndex = if (isSnapModeActive) snapWordTray.indexOfFirst { it.id == tile.id } else -1
-                        val isSnapSelected = snapOrderIndex != -1
+                        key(tile.id) {
+                            val index = i
+                            val isBeingDragged = (draggedTileId == tile.id)
+                            val isCurrentGloballyDragged = isDraggingGlobally && isBeingDragged
+                            val displayOffset = if (isBeingDragged && !isDraggingGlobally) dragOffset.x else 0f
+                            val snapOrderIndex = if (isSnapModeActive) snapWordTray.indexOfFirst { it.id == tile.id } else -1
+                            val isSnapSelected = snapOrderIndex != -1
+                            val isTrayWordTile = trayWordInfo != null && selectedTileIndex == null && !isSnapModeActive && index in trayWordInfo.startIndex..trayWordInfo.endIndex
 
-                        Box(
-                            modifier = Modifier
-                                .onGloballyPositioned { coordinates ->
-                                    tilePositions[index] = coordinates.positionInRoot()
-                                }
-                                .graphicsLayer {
-                                    translationX = displayOffset
-                                    if (isBeingDragged && !isDraggingGlobally) {
-                                        scaleX = 1.15f
-                                        scaleY = 1.15f
+                            Box(
+                                modifier = Modifier
+                                    .zIndex(if (isBeingDragged) 10f else 1f)
+                                    .onGloballyPositioned { coordinates ->
+                                        if (index in tilePositions.indices) {
+                                            tilePositions[index] = coordinates.positionInRoot()
+                                        }
                                     }
-                                    alpha = if (isCurrentGloballyDragged) 0.2f else 1.0f
-                                }
-                                .pointerInput(index, rack.size) {
-                                    detectDragGestures(
-                                        onDragStart = { offset ->
-                                            if (isPlayerTurn && !isSnapModeActive) {
-                                                draggedIndex = index
+                                    .graphicsLayer {
+                                        translationX = displayOffset
+                                        if (isBeingDragged && !isDraggingGlobally) {
+                                            scaleX = 1.15f
+                                            scaleY = 1.15f
+                                        }
+                                        alpha = if (isCurrentGloballyDragged) 0.2f else 1.0f
+                                    }
+                                    .pointerInput(tile.id, isPlayerTurn, isSnapModeActive) {
+                                        detectDragGestures(
+                                            onDragStart = { offset ->
+                                                if (isPlayerTurn && !isSnapModeActive) {
+                                                    draggedTileId = tile.id
+                                                    dragOffset = Offset.Zero
+                                                    isDraggingGlobally = false
+                                                    onDragStateChanged(true)
+                                                }
+                                            },
+                                            onDragEnd = {
+                                                if (isDraggingGlobally) {
+                                                    onDragEnd()
+                                                }
+                                                draggedTileId = null
                                                 dragOffset = Offset.Zero
                                                 isDraggingGlobally = false
-                                                onDragStateChanged(true)
-                                            }
-                                        },
-                                        onDragEnd = {
-                                            if (isDraggingGlobally) {
-                                                onDragEnd()
-                                            }
-                                            draggedIndex = null
-                                            dragOffset = Offset.Zero
-                                            isDraggingGlobally = false
-                                            onDragStateChanged(false)
-                                        },
-                                        onDragCancel = {
-                                            if (isDraggingGlobally) {
-                                                onDragEnd()
-                                            }
-                                            draggedIndex = null
-                                            dragOffset = Offset.Zero
-                                            isDraggingGlobally = false
-                                            onDragStateChanged(false)
-                                        },
-                                        onDrag = { change, dragAmount ->
-                                            if (isPlayerTurn && !isSnapModeActive) {
-                                                change.consume()
-                                                dragOffset += dragAmount
+                                                onDragStateChanged(false)
+                                            },
+                                            onDragCancel = {
+                                                if (isDraggingGlobally) {
+                                                    onDragEnd()
+                                                }
+                                                draggedTileId = null
+                                                dragOffset = Offset.Zero
+                                                isDraggingGlobally = false
+                                                onDragStateChanged(false)
+                                            },
+                                            onDrag = { change, dragAmount ->
+                                                if (isPlayerTurn && !isSnapModeActive && draggedTileId == tile.id) {
+                                                    change.consume()
+                                                    dragOffset += dragAmount
 
-                                                if (!isDraggingGlobally) {
-                                                    // Check if dragging upwards out of the rack
-                                                    if (dragOffset.y < -tileHeightPx * 0.5f) {
-                                                        isDraggingGlobally = true
-                                                        val startPos = tilePositions[index] + dragOffset - Offset(tileWidthPx / 2f, tileHeightPx / 2f)
-                                                        onDragStart(index, tile, startPos)
-                                                    } else {
-                                                        val currentDragged = draggedIndex
-                                                        if (currentDragged != null) {
-                                                            val horizOffset = dragOffset.x
-                                                            if (horizOffset > slotDistance / 2f && currentDragged < rack.lastIndex) {
-                                                                onRearrange(currentDragged, currentDragged + 1)
-                                                                draggedIndex = currentDragged + 1
-                                                                dragOffset = dragOffset.copy(x = horizOffset - slotDistance)
-                                                            } else if (horizOffset < -slotDistance / 2f && currentDragged > 0) {
-                                                                onRearrange(currentDragged, currentDragged - 1)
-                                                                draggedIndex = currentDragged - 1
-                                                                dragOffset = dragOffset.copy(x = horizOffset + slotDistance)
+                                                    if (!isDraggingGlobally) {
+                                                        // Check if dragging upwards out of the rack
+                                                        if (dragOffset.y < -tileHeightPx * 0.4f) {
+                                                            isDraggingGlobally = true
+                                                            val currentIdx = rack.indexOfFirst { it.id == tile.id }
+                                                            val validIdx = if (currentIdx != -1) currentIdx else index
+                                                            val startPos = tilePositions.getOrElse(validIdx) { Offset.Zero } + dragOffset - Offset(tileWidthPx / 2f, tileHeightPx / 2f)
+                                                            onDragStart(validIdx, tile, startPos)
+                                                        } else {
+                                                            val currentIdx = rack.indexOfFirst { it.id == tile.id }
+                                                            if (currentIdx != -1) {
+                                                                val horizOffset = dragOffset.x
+                                                                if (horizOffset > slotDistance * 0.5f && currentIdx < rack.lastIndex) {
+                                                                    onRearrange(currentIdx, currentIdx + 1)
+                                                                    dragOffset = Offset.Zero
+                                                                } else if (horizOffset < -slotDistance * 0.5f && currentIdx > 0) {
+                                                                    onRearrange(currentIdx, currentIdx - 1)
+                                                                    dragOffset = Offset.Zero
+                                                                }
                                                             }
                                                         }
+                                                    } else {
+                                                        onDrag(dragAmount)
                                                     }
-                                                } else {
-                                                    onDrag(dragAmount)
                                                 }
                                             }
-                                        }
-                                    )
-                                }
-                        ) {
-                            ScrabbleTileView(
-                                tile = tile,
-                                palette = palette,
-                                size = calculatedTileSize,
-                                isSelected = if (isSnapModeActive) isSnapSelected else (selectedTileIndex == index),
-                                isPending = false,
-                                onClick = if (isPlayerTurn && draggedIndex == null) { { onTileClick(index) } } else null
-                            )
-
-                            // In Snap Mode, show order badge on selected tiles
-                            if (isSnapModeActive && isSnapSelected) {
-                                Surface(
-                                    modifier = Modifier
-                                        .align(Alignment.TopEnd)
-                                        .offset(x = 3.dp, y = (-3).dp)
-                                        .size(16.dp),
-                                    shape = CircleShape,
-                                    color = palette.primaryColor,
-                                    border = BorderStroke(1.dp, Color.White),
-                                    shadowElevation = 2.dp
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Text(
-                                            text = "${snapOrderIndex + 1}",
-                                            fontSize = 9.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color.White
                                         )
+                                    }
+                            ) {
+                                ScrabbleTileView(
+                                    tile = tile,
+                                    palette = palette,
+                                    size = calculatedTileSize,
+                                    isSelected = if (isSnapModeActive) isSnapSelected else (selectedTileIndex == index),
+                                    isPending = false,
+                                    isTrayWordTile = isTrayWordTile,
+                                    onClick = if (isPlayerTurn && draggedTileId == null) { { onTileClick(index) } } else null
+                                )
+
+                                // In Snap Mode, show order badge on selected tiles
+                                if (isSnapModeActive && isSnapSelected) {
+                                    Surface(
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .offset(x = 3.dp, y = (-3).dp)
+                                            .size(16.dp),
+                                        shape = CircleShape,
+                                        color = palette.primaryColor,
+                                        border = BorderStroke(1.dp, Color.White),
+                                        shadowElevation = 2.dp
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Text(
+                                                text = "${snapOrderIndex + 1}",
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color.White
+                                            )
+                                        }
                                     }
                                 }
                             }

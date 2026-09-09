@@ -253,7 +253,8 @@ fun ScrabbleScreen(
                             isPlayerTurn = state.isPlayerTurn && !state.isAiThinking,
                             isAiThinking = state.isAiThinking,
                             statusMessage = state.messageToast,
-                            palette = palette
+                            palette = palette,
+                            trayWordInfo = state.trayWordInfo
                         )
 
                         Spacer(modifier = Modifier.height(3.dp))
@@ -271,6 +272,7 @@ fun ScrabbleScreen(
                             swapsLeft = state.swapsLeft,
                             isAiThinking = state.isAiThinking,
                             statusMessage = state.messageToast,
+                            trayWordInfo = state.trayWordInfo,
                             palette = palette,
                             onTileClick = { idx -> viewModel.onRackTileClick(idx) },
                             onShuffle = { viewModel.onShuffleRack() },
@@ -403,7 +405,8 @@ fun ScrabbleScreen(
                         isPlayerTurn = state.isPlayerTurn && !state.isAiThinking,
                         isAiThinking = state.isAiThinking,
                         statusMessage = state.messageToast,
-                        palette = palette
+                        palette = palette,
+                        trayWordInfo = state.trayWordInfo
                     )
                 }
 
@@ -425,6 +428,7 @@ fun ScrabbleScreen(
                     swapsLeft = state.swapsLeft,
                     isAiThinking = state.isAiThinking,
                     statusMessage = state.messageToast,
+                    trayWordInfo = state.trayWordInfo,
                     palette = palette,
                     onTileClick = { idx -> viewModel.onRackTileClick(idx) },
                     onShuffle = { viewModel.onShuffleRack() },

@@ -18,7 +18,8 @@ object WordDictionary {
     val allWordsList = ArrayList<String>(280000)
 
     @Volatile
-    private var isInitialized = false
+    var isInitialized = false
+        private set
 
     fun init() {
         if (isInitialized) return
