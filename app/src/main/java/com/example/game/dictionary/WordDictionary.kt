@@ -188,19 +188,34 @@ object WordDictionary {
     private fun loadFromStream(stream: InputStream): Int {
         var loadedCount = 0
         GZIPInputStream(stream).use { gzIn ->
-            BufferedReader(InputStreamReader(gzIn, Charsets.UTF_8)).use { reader ->
-                var line = reader.readLine()
-                while (line != null) {
-                    val w = line.trim().uppercase()
-                    if (w.length >= 2 && w.all { it in 'A'..'Z' }) {
-                        if (wordSet.add(w)) {
-                            allWordsList.add(w)
-                            loadedCount++
-                        }
-                    }
-                    line = reader.readLine()
+            loadedCount += loadLines(
+                BufferedReader(InputStreamReader(gzIn, Charsets.UTF_8))
+            )
+        }
+        return loadedCount
+    }
+
+    /** Plain-text sibling of [loadFromStream], for clones that carry
+     * the word list as scrabble_words.txt (the .gz cannot be pushed
+     * through the GitHub push route, which only carries text). */
+    private fun loadPlainStream(stream: InputStream): Int {
+        BufferedReader(InputStreamReader(stream, Charsets.UTF_8)).use { reader ->
+            return loadLines(reader)
+        }
+    }
+
+    private fun loadLines(reader: BufferedReader): Int {
+        var loadedCount = 0
+        var line = reader.readLine()
+        while (line != null) {
+            val w = line.trim().uppercase()
+            if (w.length >= 2 && w.all { it in 'A'..'Z' }) {
+                if (wordSet.add(w)) {
+                    allWordsList.add(w)
+                    loadedCount++
                 }
             }
+            line = reader.readLine()
         }
         return loadedCount
     }
@@ -215,6 +230,16 @@ object WordDictionary {
             try {
                 context.assets.open("scrabble_words.txt.gz").use { stream ->
                     loadedCount += loadFromStream(stream)
+                }
+            } catch (_: Exception) {
+                // Fall through to the .txt attempt below
+            }
+        }
+
+        if (loadedCount == 0 && context != null) {
+            try {
+                context.assets.open("scrabble_words.txt").use { stream ->
+                    loadedCount += loadPlainStream(stream)
                 }
             } catch (_: Exception) {
                 // Fall through to the classloader attempt below
@@ -232,6 +257,23 @@ object WordDictionary {
 
                 if (stream != null) {
                     stream.use { loadedCount += loadFromStream(it) }
+                }
+            } catch (_: Exception) {
+                // Fallback continues below
+            }
+        }
+
+        if (loadedCount == 0) {
+            try {
+                val stream: InputStream? =
+                    WordDictionary::class.java.getResourceAsStream("/scrabble_words.txt")
+                        ?: WordDictionary::class.java.classLoader?.getResourceAsStream("scrabble_words.txt")
+                        ?: Thread.currentThread().contextClassLoader?.getResourceAsStream("scrabble_words.txt")
+                        ?: ClassLoader.getSystemResourceAsStream("scrabble_words.txt")
+                        ?: WordDictionary::class.java.getResourceAsStream("/assets/scrabble_words.txt")
+
+                if (stream != null) {
+                    stream.use { loadedCount += loadPlainStream(it) }
                 }
             } catch (_: Exception) {
                 // Fallback continues below
