@@ -26,6 +26,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.res.painterResource
+import com.example.game.dictionary.OnlineDictionary
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.example.R
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
@@ -55,6 +58,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -79,6 +83,7 @@ import com.example.game.model.Difficulty
 import com.example.game.model.GameLogEntry
 import com.example.game.model.GameStats
 import com.example.game.model.GameThemePalette
+import com.example.game.model.getLetterPoints
 import com.example.game.model.InspectedWordInfo
 import com.example.game.model.ThemeMode
 import com.example.game.model.Tile
@@ -143,6 +148,15 @@ fun BlankTilePickerDialog(
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 18.sp,
                                     color = palette.tileTextColor
+                                )
+                                Text(
+                                    text = getLetterPoints(char).toString(),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 10.sp,
+                                    color = palette.tileTextColor.copy(alpha = 0.75f),
+                                    modifier = Modifier
+                                        .align(Alignment.BottomEnd)
+                                        .padding(end = 3.dp, bottom = 2.dp)
                                 )
                             }
                         }
@@ -710,6 +724,18 @@ fun DifficultySettingsDialog(
                         Text("Apply Settings")
                     }
                 }
+
+                // Build stamp: visible proof of exactly which build is
+                // running, so a screenshot settles any "did the update
+                // actually install?" question. Bump on every delivery.
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Build: tiles-v9 · 28 Oct 2026",
+                    color = palette.tileTextColor.copy(alpha = 0.6f),
+                    fontSize = 11.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
         }
     }
@@ -1306,7 +1332,27 @@ fun WordDefinitionDialog(
     palette: GameThemePalette,
     onDismiss: () -> Unit
 ) {
-    val definition = WordDictionary.getDefinition(word)
+    // Real meaning first from the built-in dictionary; otherwise look it
+    // up online (same source as the board inspection card). This dialog
+    // has no auto-dismiss, so a slow lookup simply arrives late.
+    val localDefinition = WordDictionary.getLocalDefinition(word)
+    var definition by remember(word) {
+        mutableStateOf(localDefinition ?: "Looking up the meaning…")
+    }
+    LaunchedEffect(word) {
+        if (localDefinition == null) {
+            val online = withContext(Dispatchers.IO) {
+                OnlineDictionary.fetchDefinition(word)
+            }
+            definition = when (online) {
+                is OnlineDictionary.LookupResult.Found -> online.definition
+                OnlineDictionary.LookupResult.NotInDictionary ->
+                    "No online definition found for $word."
+                OnlineDictionary.LookupResult.LookupFailed ->
+                    "Couldn't reach the online dictionary."
+            }
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,

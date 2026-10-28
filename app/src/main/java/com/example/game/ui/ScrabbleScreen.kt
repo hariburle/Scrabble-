@@ -45,6 +45,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -55,8 +56,10 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.style.TextAlign
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.game.dictionary.WordDictionary
 import com.example.game.model.GameThemePalette
 import com.example.game.model.ThemeMode
 import com.example.game.ui.components.BlankTilePickerDialog
@@ -85,6 +88,15 @@ fun ScrabbleScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val systemInDark = isSystemInDarkTheme()
+
+    // Load the full bundled word list from assets. The ViewModel's init()
+    // (no Context) can only load the small hardcoded fallback on device, so
+    // this upgrades it to the complete lexicon before the first move.
+    val appContext = LocalContext.current
+    LaunchedEffect(Unit) {
+        WordDictionary.init(appContext)
+        viewModel.restorePersistedSettings(appContext)
+    }
 
     // Determine active palette based on user selected ThemeMode and Palette
     val palette = remember(state.currentTheme, state.themeMode, systemInDark) {
@@ -117,6 +129,14 @@ fun ScrabbleScreen(
 
     var isDraggingTile by remember { mutableStateOf(false) }
     var draggedTileInfo by remember { mutableStateOf<Triple<Int, com.example.game.model.Tile, Offset>?>(null) }
+
+    // If the turn flips mid-drag (e.g. the turn timer forces a pass), drop
+    // the floating drag tile instead of leaving it stuck on screen.
+    LaunchedEffect(state.isPlayerTurn) {
+        if (!state.isPlayerTurn) {
+            draggedTileInfo = null
+        }
+    }
     val cellBoundsMap = remember { mutableStateMapOf<Pair<Int, Int>, Rect>() }
 
     var boardScale by remember { mutableStateOf(1.0f) }
@@ -196,18 +216,20 @@ fun ScrabbleScreen(
                             cellBoundsMap[r to c] = bounds
                         },
                         hoveredCell = hoveredCell,
+                        draggedPendingTileId = draggedTileInfo?.takeIf { it.first == -1 }?.second?.id,
                         onPendingDragStart = { r, c, tile, initialOffset ->
-                            val idx = state.playerRack.indexOfFirst { it.id == tile.id }
-                            if (idx != -1) {
-                                isDraggingTile = true
-                                val cellBounds = cellBoundsMap[r to c]
-                                val startPos = if (cellBounds != null) {
-                                    cellBounds.topLeft + initialOffset
-                                } else {
-                                    Offset.Zero
-                                }
-                                draggedTileInfo = Triple(idx, tile, startPos)
+                            // Fix: pending tiles are no longer in the rack, so the old
+                            // rack-index lookup always returned -1 and the drag never
+                            // started. Mark pending re-drags with index -1; the drop
+                            // handler moves them via onMovePendingTile().
+                            isDraggingTile = true
+                            val cellBounds = cellBoundsMap[r to c]
+                            val startPos = if (cellBounds != null) {
+                                cellBounds.topLeft + initialOffset
+                            } else {
+                                Offset.Zero
                             }
+                            draggedTileInfo = Triple(-1, tile, startPos)
                         },
                         onPendingDrag = { amount ->
                             draggedTileInfo = draggedTileInfo?.let {
@@ -222,7 +244,16 @@ fun ScrabbleScreen(
                                 val droppedCell = cellBoundsMap.entries.firstOrNull { (_, bounds) ->
                                     bounds.contains(targetPoint)
                                 }?.key
-                                if (droppedCell != null) {
+                                if (idx == -1) {
+                                    // Re-drag of an uncommitted (pending) tile: move it
+                                    // between board cells. Dropped outside the board
+                                    // (including on the tray) -> back to the rack.
+                                    if (droppedCell != null) {
+                                        viewModel.onMovePendingTile(tile.id, droppedCell.first, droppedCell.second)
+                                    } else {
+                                        viewModel.recallPendingTile(tile.id)
+                                    }
+                                } else if (droppedCell != null) {
                                     viewModel.onDropTileOnBoard(idx, droppedCell.first, droppedCell.second)
                                 } else {
                                     viewModel.recallPendingTile(tile.id)
@@ -327,6 +358,8 @@ fun ScrabbleScreen(
                             onSwap = { viewModel.setDialogVisible(swap = true) },
                             onPlayMove = { viewModel.onPlayMove() },
                             onHint = { viewModel.onGetHint() },
+                            hintShown = state.hintMove != null,
+                            onAcceptHint = { viewModel.onAcceptHint() },
                             onPass = { viewModel.onPassTurn() },
                             onRearrange = { from, to -> viewModel.onRearrangePlayerRack(from, to) },
                             onRearrangeFinished = { viewModel.onRackDragFinished() },
@@ -443,18 +476,20 @@ fun ScrabbleScreen(
                             cellBoundsMap[r to c] = bounds
                         },
                         hoveredCell = hoveredCell,
+                        draggedPendingTileId = draggedTileInfo?.takeIf { it.first == -1 }?.second?.id,
                         onPendingDragStart = { r, c, tile, initialOffset ->
-                            val idx = state.playerRack.indexOfFirst { it.id == tile.id }
-                            if (idx != -1) {
-                                isDraggingTile = true
-                                val cellBounds = cellBoundsMap[r to c]
-                                val startPos = if (cellBounds != null) {
-                                    cellBounds.topLeft + initialOffset
-                                } else {
-                                    Offset.Zero
-                                }
-                                draggedTileInfo = Triple(idx, tile, startPos)
+                            // Fix: pending tiles are no longer in the rack, so the old
+                            // rack-index lookup always returned -1 and the drag never
+                            // started. Mark pending re-drags with index -1; the drop
+                            // handler moves them via onMovePendingTile().
+                            isDraggingTile = true
+                            val cellBounds = cellBoundsMap[r to c]
+                            val startPos = if (cellBounds != null) {
+                                cellBounds.topLeft + initialOffset
+                            } else {
+                                Offset.Zero
                             }
+                            draggedTileInfo = Triple(-1, tile, startPos)
                         },
                         onPendingDrag = { amount ->
                             draggedTileInfo = draggedTileInfo?.let {
@@ -469,7 +504,16 @@ fun ScrabbleScreen(
                                 val droppedCell = cellBoundsMap.entries.firstOrNull { (_, bounds) ->
                                     bounds.contains(targetPoint)
                                 }?.key
-                                if (droppedCell != null) {
+                                if (idx == -1) {
+                                    // Re-drag of an uncommitted (pending) tile: move it
+                                    // between board cells. Dropped outside the board
+                                    // (including on the tray) -> back to the rack.
+                                    if (droppedCell != null) {
+                                        viewModel.onMovePendingTile(tile.id, droppedCell.first, droppedCell.second)
+                                    } else {
+                                        viewModel.recallPendingTile(tile.id)
+                                    }
+                                } else if (droppedCell != null) {
                                     viewModel.onDropTileOnBoard(idx, droppedCell.first, droppedCell.second)
                                 } else {
                                     viewModel.recallPendingTile(tile.id)
@@ -480,6 +524,18 @@ fun ScrabbleScreen(
                         }
                     )
                 }
+
+                // Build stamp on the game screen itself: every board
+                // screenshot carries proof of the running build, so a
+                // "tiles still look old" report can be checked at a glance.
+                // Bump on every delivery.
+                Text(
+                    text = "Build: tiles-v9 · 28 Oct 2026",
+                    color = palette.tileTextColor.copy(alpha = 0.55f),
+                    fontSize = 11.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
 
                 // Generous vertical spacer to distribute excess screen space nicely on tall devices
                 Spacer(modifier = Modifier.weight(0.12f))
@@ -529,6 +585,8 @@ fun ScrabbleScreen(
                     onSwap = { viewModel.setDialogVisible(swap = true) },
                     onPlayMove = { viewModel.onPlayMove() },
                     onHint = { viewModel.onGetHint() },
+                    hintShown = state.hintMove != null,
+                    onAcceptHint = { viewModel.onAcceptHint() },
                     onPass = { viewModel.onPassTurn() },
                     onRearrange = { from, to -> viewModel.onRearrangePlayerRack(from, to) },
                     onRearrangeFinished = { viewModel.onRackDragFinished() },

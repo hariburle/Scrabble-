@@ -1,8 +1,10 @@
 package com.example.game.ui
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.game.dictionary.WordDictionary
+import com.example.game.dictionary.OnlineDictionary
 import com.example.game.engine.AiCandidateMove
 import com.example.game.engine.AiEngine
 import com.example.game.engine.ScrabbleEngine
@@ -27,6 +29,18 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+private const val SETTINGS_PREFS = "scrabble_settings"
+private const val KEY_DIFFICULTY = "difficulty"
+private const val KEY_CUSTOM_VOCAB = "custom_vocab"
+private const val KEY_CUSTOM_AGGR = "custom_aggr"
+private const val KEY_CUSTOM_MAXLEN = "custom_maxlen"
+private const val KEY_THEME_MODE = "theme_mode"
+private const val KEY_THEME = "theme"
+private const val KEY_SOUND = "sound_enabled"
+private const val KEY_TIMED = "timed_enabled"
+private const val KEY_TIMED_SECS = "timed_seconds"
 
 data class ScrabbleUiState(
     val board: Array<Array<BoardCell>> = ScrabbleEngine.createEmptyBoard(),
@@ -102,6 +116,13 @@ class ScrabbleViewModel : ViewModel() {
     private var tileBag = mutableListOf<Tile>()
     private var timerJob: kotlinx.coroutines.Job? = null
     private var wordInspectionDismissJob: kotlinx.coroutines.Job? = null
+    private var definitionLookupJob: kotlinx.coroutines.Job? = null
+
+    // Settings persistence: everything the user changes in the settings
+    // dialog is saved to SharedPreferences on every change and restored
+    // on launch, so a fresh app start keeps the bot, theme, sound and
+    // timed-mode choices instead of reverting to defaults.
+    private var settingsContext: Context? = null
 
     init {
         viewModelScope.launch {
@@ -152,7 +173,7 @@ class ScrabbleViewModel : ViewModel() {
                 isSnapModeActive = false,
                 snapSelectedCell = null,
                 fullRackBeforeSnap = emptyList(),
-                messageToast = "Game started! Place your first word over the center star (★)"
+                messageToast = "Game started! Cover the center ★"
             )
         }
         startTurnTimer()
@@ -170,7 +191,9 @@ class ScrabbleViewModel : ViewModel() {
             // Deselect
             _uiState.update { it.copy(selectedRackIndex = null) }
         } else {
-            _uiState.update { it.copy(selectedRackIndex = index) }
+            _uiState.update {
+                it.copy(selectedRackIndex = index, selectedBoardCell = null)
+            }
         }
     }
 
@@ -187,6 +210,24 @@ class ScrabbleViewModel : ViewModel() {
         val pendingTile = state.pendingPlacements[row to col]
 
         if (pendingTile != null) {
+            // Tap-to-move (Hari, Oct 26): the first tap picks an
+            // uncommitted tile up (highlighted via selectedBoardCell)
+            // instead of sending it back; tapping an empty cell while
+            // one is picked up moves it there (see below). Tapping the
+            // picked-up tile again returns it to the rack, as before.
+            // A blank still waiting for its letter keeps the old
+            // tap-to-recall behavior so the picker flow is untouched.
+            if (state.selectedBoardCell != row to col &&
+                state.blankPickerCell != row to col
+            ) {
+                _uiState.update {
+                    it.copy(
+                        selectedBoardCell = row to col,
+                        selectedRackIndex = null
+                    )
+                }
+                return
+            }
             // Tile was placed this turn -> return it to player's rack
             val newPending = state.pendingPlacements.toMutableMap()
             newPending.remove(row to col)
@@ -215,6 +256,14 @@ class ScrabbleViewModel : ViewModel() {
         // If an empty cell is tapped and there was an active word inspection, dismiss inspection
         if (state.inspectedWordInfo != null) {
             _uiState.update { it.copy(inspectedWordInfo = null) }
+        }
+
+        // A picked-up board tile moves here (tap-to-move).
+        val pickedCell = state.selectedBoardCell
+        if (pickedCell != null) {
+            val pickedTile = state.pendingPlacements[pickedCell] ?: return
+            onMovePendingTile(pickedTile.id, row, col)
+            return
         }
 
         // If a rack tile is selected, place it here!
@@ -253,9 +302,60 @@ class ScrabbleViewModel : ViewModel() {
         }
     }
 
+    // Guaranteed recall: moves the pending tile straight back to the rack
+    // (no click semantics — a plain click would merely select the tile when
+    // nothing is picked up). Used when a pending tile is dragged off the
+    // board. A blank returns as a blank (assignedLetter cleared).
     fun recallPendingTile(tileId: String) {
-        val entry = _uiState.value.pendingPlacements.entries.firstOrNull { it.value.id == tileId } ?: return
-        onBoardCellClick(entry.key.first, entry.key.second)
+        val state = _uiState.value
+        if (!state.isPlayerTurn || state.isAiThinking) return
+        val entry = state.pendingPlacements.entries.firstOrNull { it.value.id == tileId } ?: return
+        val (fromCell, pendingTile) = entry
+        val newPending = state.pendingPlacements.toMutableMap()
+        newPending.remove(fromCell)
+        val newRack = state.playerRack.toMutableList()
+        newRack.add(pendingTile.copy(assignedLetter = null))
+        val validation = evaluatePendingPlacements(state.board, newPending)
+        _uiState.update {
+            it.copy(
+                playerRack = newRack,
+                pendingPlacements = newPending,
+                validationResult = validation,
+                selectedBoardCell = null,
+                trayWordInfo = computeTrayWordInfo(newRack, newPending.isNotEmpty())
+            )
+        }
+    }
+
+    /**
+     * Moves an already-placed (but uncommitted) tile from one board cell to another.
+     * Used when the player drags a pending tile to reposition it before hitting PLAY.
+     */
+    fun onMovePendingTile(tileId: String, toRow: Int, toCol: Int) {
+        val state = _uiState.value
+        if (!state.isPlayerTurn || state.isAiThinking) return
+
+        val fromCell = state.pendingPlacements.entries.firstOrNull { it.value.id == tileId }?.key ?: return
+        val toCell = toRow to toCol
+        if (fromCell == toCell) return
+
+        // Target must be free: no committed tile and no other pending tile on it
+        if (toRow !in 0 until ScrabbleEngine.BOARD_SIZE || toCol !in 0 until ScrabbleEngine.BOARD_SIZE) return
+        if (state.board[toRow][toCol].tile != null || state.pendingPlacements.containsKey(toCell)) return
+
+        val tile = state.pendingPlacements[fromCell] ?: return
+        val newPending = state.pendingPlacements.toMutableMap()
+        newPending.remove(fromCell)
+        newPending[toCell] = tile
+
+        val validation = evaluatePendingPlacements(state.board, newPending)
+        _uiState.update {
+            it.copy(
+                pendingPlacements = newPending,
+                validationResult = validation,
+                selectedBoardCell = null
+            )
+        }
     }
 
     fun onDropTileOnBoard(rackIndex: Int, row: Int, col: Int, tileId: String? = null) {
@@ -314,11 +414,17 @@ class ScrabbleViewModel : ViewModel() {
         val newPending = state.pendingPlacements.toMutableMap()
         newPending[targetCell] = updatedTile
 
+        // Fix: if another blank still needs a letter, keep the picker open on it
+        // instead of leaving it unassignable (tapping it would just return it to the rack).
+        val nextBlankCell = newPending.entries.firstOrNull {
+            it.value.isBlank && it.value.assignedLetter == null
+        }?.key
+
         val validation = evaluatePendingPlacements(state.board, newPending)
         _uiState.update {
             it.copy(
                 pendingPlacements = newPending,
-                blankPickerCell = null,
+                blankPickerCell = nextBlankCell,
                 validationResult = validation
             )
         }
@@ -342,6 +448,7 @@ class ScrabbleViewModel : ViewModel() {
                 playerRack = newRack,
                 pendingPlacements = emptyMap(),
                 selectedRackIndex = null,
+                selectedBoardCell = null,
                 validationResult = null,
                 trayWordInfo = computeTrayWordInfo(newRack)
             )
@@ -546,10 +653,14 @@ class ScrabbleViewModel : ViewModel() {
                 it.copy(
                     board = newBoard,
                     playerRack = replenishedRack,
+                    // Fix: recompute the tray-word highlight for the fresh rack so the
+                    // gold highlight from the previous rack doesn't linger on wrong tiles
+                    trayWordInfo = computeTrayWordInfo(replenishedRack),
                     tileBagCount = tileBag.size,
                     playerScore = newPlayerScore,
                     pendingPlacements = emptyMap(),
                     selectedRackIndex = null,
+                    selectedBoardCell = null,
                     validationResult = null,
                     lastMoveCells = lastCells,
                     lastWordSpanCells = fullSpanCells,
@@ -697,6 +808,8 @@ class ScrabbleViewModel : ViewModel() {
         _uiState.update {
             it.copy(
                 playerRack = newRack,
+                // Fix: recompute the tray-word highlight for the swapped-in rack
+                trayWordInfo = computeTrayWordInfo(newRack),
                 tileBagCount = tileBag.size,
                 playerTurnCount = newPlayerTurnCount,
                 isPlayerTurn = false,
@@ -747,6 +860,47 @@ class ScrabbleViewModel : ViewModel() {
                     it.copy(messageToast = "No clear high-scoring play found. Try shuffling or swapping tiles!")
                 }
             }
+        }
+    }
+
+    /**
+     * Stages the currently shown hint's tiles on the board as this turn's
+     * pending placements, so the player can press PLAY to play it — instead
+     * of placing every tile by hand. Any tiles the player already placed
+     * are returned to the rack first (nothing is lost); hint blanks already
+     * carry their assigned letter, so no picker opens. The hint itself is
+     * cleared once staged, and nothing is committed until PLAY is pressed.
+     * No-ops when no hint is shown, when it is not the player's turn, or
+     * in snap mode (which has its own tray).
+     */
+    fun onAcceptHint() {
+        val state = _uiState.value
+        if (!state.isPlayerTurn || state.isAiThinking || state.isSnapModeActive) return
+        val hint = state.hintMove ?: return
+        val newRack = state.playerRack.toMutableList()
+        for ((_, tile) in state.pendingPlacements) {
+            newRack.add(tile.copy(assignedLetter = null))
+        }
+        val newPending = mutableMapOf<Pair<Int, Int>, com.example.game.model.Tile>()
+        for (placement in hint.placements) {
+            val idx = newRack.indexOfFirst { it.id == placement.tile.id }
+            if (idx < 0) return
+            newRack.removeAt(idx)
+            newPending[placement.row to placement.col] = placement.tile
+        }
+        val validation = evaluatePendingPlacements(state.board, newPending)
+        _uiState.update {
+            it.copy(
+                playerRack = newRack,
+                pendingPlacements = newPending,
+                validationResult = validation,
+                selectedBoardCell = null,
+                selectedRackIndex = null,
+                blankPickerCell = null,
+                hintMove = null,
+                trayWordInfo = computeTrayWordInfo(newRack, newPending.isNotEmpty()),
+                messageToast = "Hint placed — press PLAY to play it!"
+            )
         }
     }
 
@@ -1026,13 +1180,13 @@ class ScrabbleViewModel : ViewModel() {
             for (ch in chosenWord) {
                 rawPts += com.example.game.model.getLetterPoints(ch)
             }
-            val def = WordDictionary.getDefinition(chosenWord)
+            val localDef = WordDictionary.getLocalDefinition(chosenWord)
             _uiState.update {
                 it.copy(
                     inspectedWordInfo = InspectedWordInfo(
                         word = chosenWord,
                         totalScore = rawPts,
-                        definition = def,
+                        definition = localDef ?: "Looking up the meaning…",
                         coordinates = coords
                     ),
                     lastMoveCells = coords.toSet(),
@@ -1040,19 +1194,40 @@ class ScrabbleViewModel : ViewModel() {
                 )
             }
 
-            // Fetch actual dictionary definition from open Free Dictionary API in the background
-            viewModelScope.launch(Dispatchers.IO) {
-                val onlineDef = fetchOnlineDefinition(chosenWord)
-                if (onlineDef != null) {
-                    val formattedDef = "$onlineDef (Definition retrieved in real-time)."
+            // Real meaning from the Free Dictionary API, in the background.
+            // Only when the built-in dictionary has nothing real. A word
+            // the API doesn't know, or an unreachable API, now says so
+            // plainly instead of falling back to the generic line.
+            if (localDef == null) {
+                definitionLookupJob?.cancel()
+                definitionLookupJob = viewModelScope.launch {
+                    val onlineDef = withContext(Dispatchers.IO) {
+                        OnlineDictionary.fetchDefinition(chosenWord)
+                    }
+                    var stillShowing = false
                     _uiState.update { current ->
                         if (current.inspectedWordInfo?.word == chosenWord) {
+                            stillShowing = true
+                            val newDef = when (onlineDef) {
+                                is OnlineDictionary.LookupResult.Found ->
+                                    "${onlineDef.definition} (Definition retrieved in real-time)."
+                                OnlineDictionary.LookupResult.NotInDictionary ->
+                                    "No online definition found for $chosenWord."
+                                OnlineDictionary.LookupResult.LookupFailed ->
+                                    "Couldn't reach the online dictionary."
+                            }
                             current.copy(
-                                inspectedWordInfo = current.inspectedWordInfo.copy(definition = formattedDef)
+                                inspectedWordInfo = current.inspectedWordInfo.copy(definition = newDef)
                             )
                         } else current
                     }
+                    // The reading window starts only once the answer is in:
+                    // a slow lookup used to eat the whole 6s, so the card
+                    // could vanish before the definition was even readable.
+                    if (stillShowing) scheduleInspectionDismiss()
                 }
+            } else {
+                scheduleInspectionDismiss()
             }
         } else {
             // Single standalone tile or no full word
@@ -1070,34 +1245,7 @@ class ScrabbleViewModel : ViewModel() {
                     lastWordSpanCells = setOf(row to col)
                 )
             }
-        }
-        wordInspectionDismissJob = viewModelScope.launch {
-            delay(6000)
-            dismissWordInspection()
-        }
-    }
-
-    private fun fetchOnlineDefinition(word: String): String? {
-        return try {
-            val url = java.net.URL("https://api.dictionaryapi.dev/api/v2/entries/en/${word.lowercase()}")
-            val connection = url.openConnection() as java.net.HttpURLConnection
-            connection.requestMethod = "GET"
-            connection.connectTimeout = 3000
-            connection.readTimeout = 3000
-            if (connection.responseCode == 200) {
-                val response = connection.inputStream.bufferedReader().use { it.readText() }
-                val regex = "\"definition\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"".toRegex()
-                val match = regex.find(response)
-                if (match != null) {
-                    match.groupValues[1].replace("\\\"", "\"").replace("\\'", "'")
-                } else {
-                    null
-                }
-            } else {
-                null
-            }
-        } catch (e: Throwable) {
-            null
+            scheduleInspectionDismiss()
         }
     }
 
@@ -1107,6 +1255,21 @@ class ScrabbleViewModel : ViewModel() {
 
     fun dismissWordInspection() {
         clearInspectedWord()
+    }
+
+    /**
+     * Starts (or restarts) the 6s auto-dismiss countdown for the word
+     * inspection card. Callers start it only once the card's content is
+     * final — immediately for local/single-tile definitions, and after the
+     * network response arrives for online lookups — so a slow lookup can
+     * never eat the reading window.
+     */
+    private fun scheduleInspectionDismiss() {
+        wordInspectionDismissJob?.cancel()
+        wordInspectionDismissJob = viewModelScope.launch {
+            delay(6000)
+            dismissWordInspection()
+        }
     }
 
     fun highlightLogMove(entry: GameLogEntry) {
@@ -1178,6 +1341,7 @@ class ScrabbleViewModel : ViewModel() {
                 messageToast = "AI set to ${diff.botName}"
             )
         }
+        persistSettings()
     }
 
     fun setTheme(theme: GameThemePalette) {
@@ -1195,6 +1359,7 @@ class ScrabbleViewModel : ViewModel() {
                 messageToast = "${theme.themeName} theme applied"
             )
         }
+        persistSettings()
     }
 
     fun setThemeMode(mode: ThemeMode) {
@@ -1210,6 +1375,7 @@ class ScrabbleViewModel : ViewModel() {
                 messageToast = "Display mode: ${mode.title}"
             )
         }
+        persistSettings()
     }
 
     fun setDialogVisible(
@@ -1235,15 +1401,20 @@ class ScrabbleViewModel : ViewModel() {
     }
 
     fun dismissBlankPicker() {
-        // Return blank tile to rack
+        // Return blank tile to rack.
+        // Fix: always clear blankPickerCell, even if the pending tile is already gone
+        // (e.g. the turn timer forced a pass while the picker was open) — otherwise
+        // the dialog gets stuck open with no way to dismiss it.
         val state = _uiState.value
         val targetCell = state.blankPickerCell ?: return
-        val tile = state.pendingPlacements[targetCell] ?: return
+        val tile = state.pendingPlacements[targetCell]
 
         val newPending = state.pendingPlacements.toMutableMap()
         newPending.remove(targetCell)
         val newRack = state.playerRack.toMutableList()
-        newRack.add(tile.copy(assignedLetter = null))
+        if (tile != null) {
+            newRack.add(tile.copy(assignedLetter = null))
+        }
 
         _uiState.update {
             it.copy(
@@ -1321,15 +1492,28 @@ class ScrabbleViewModel : ViewModel() {
                 state.playerRack
             }
 
+            // The suggestion (best word in the rack) is what snap mode is
+            // allowed to pick from: highlight it and start the tray with
+            // exactly its tiles. No suggestion -> fall back to the full rack.
+            val suggestion = computeTrayWordInfo(fullPlayerRack)
+            val initialSnapTray = if (suggestion != null &&
+                suggestion.endIndex < fullPlayerRack.size
+            ) {
+                fullPlayerRack.subList(suggestion.startIndex, suggestion.endIndex + 1).toList()
+            } else {
+                fullPlayerRack
+            }
+
             _uiState.update {
                 it.copy(
                     isSnapModeActive = true,
                     fullRackBeforeSnap = fullPlayerRack,
                     playerRack = fullPlayerRack,
-                    snapWordTray = fullPlayerRack,
+                    trayWordInfo = suggestion,
+                    snapWordTray = initialSnapTray,
                     snapSelectedCell = 7 to 7,
                     snapPreviewIsHorizontal = true,
-                    messageToast = "🧩 Snap Word: Tap tiles to pick only letters you want, then tap starting cell on board!"
+                    messageToast = "🧩 Snap Word: Tap the highlighted tiles to pick letters, then tap starting cell on board!"
                 )
             }
             updateSnapPreview(7, 7, true)
@@ -1357,6 +1541,15 @@ class ScrabbleViewModel : ViewModel() {
         val state = _uiState.value
         if (!state.isSnapModeActive) return
 
+        // Only the highlighted suggestion tiles can be picked. When there
+        // is no suggestion, every tile stays pickable.
+        val suggestion = state.trayWordInfo
+        if (suggestion != null) {
+            val fullRack = if (state.fullRackBeforeSnap.isNotEmpty()) state.fullRackBeforeSnap else state.playerRack
+            val idx = fullRack.indexOfFirst { it.id == tile.id }
+            if (idx !in suggestion.startIndex..suggestion.endIndex) return
+        }
+
         val currentTray = state.snapWordTray.toMutableList()
         val existingIndex = currentTray.indexOfFirst { it.id == tile.id }
         if (existingIndex != -1) {
@@ -1373,7 +1566,14 @@ class ScrabbleViewModel : ViewModel() {
         val state = _uiState.value
         if (!state.isSnapModeActive) return
         val fullRack = if (state.fullRackBeforeSnap.isNotEmpty()) state.fullRackBeforeSnap else state.playerRack
-        _uiState.update { it.copy(snapWordTray = fullRack) }
+        // "All" means all suggested tiles when a suggestion is highlighted.
+        val suggestion = state.trayWordInfo
+        val tray = if (suggestion != null && suggestion.endIndex < fullRack.size) {
+            fullRack.subList(suggestion.startIndex, suggestion.endIndex + 1).toList()
+        } else {
+            fullRack
+        }
+        _uiState.update { it.copy(snapWordTray = tray) }
         val cell = state.snapSelectedCell ?: (7 to 7)
         updateSnapPreview(cell.first, cell.second, state.snapPreviewIsHorizontal)
     }
@@ -1492,9 +1692,69 @@ class ScrabbleViewModel : ViewModel() {
     }
 
     // --- Settings / Sound Config ---
+
+    /**
+     * Restores the settings dialog choices saved by persistSettings().
+     * Called once on launch from the Screen (next to WordDictionary.init).
+     * Only touches settings fields — never board, racks or scores — so it
+     * is safe to run after the ViewModel's init already started a game.
+     * First launch (nothing saved yet) keeps the defaults.
+     */
+    fun restorePersistedSettings(context: Context) {
+        settingsContext = context.applicationContext
+        val prefs = settingsContext!!.getSharedPreferences(SETTINGS_PREFS, Context.MODE_PRIVATE)
+        if (!prefs.contains(KEY_DIFFICULTY)) return
+        val difficulty = runCatching {
+            Difficulty.valueOf(prefs.getString(KEY_DIFFICULTY, null) ?: "")
+        }.getOrNull() ?: Difficulty.BALANCED
+        val custom = CustomDifficultySettings(
+            vocabularyLevel = prefs.getFloat(KEY_CUSTOM_VOCAB, 0.65f),
+            aggressiveness = prefs.getFloat(KEY_CUSTOM_AGGR, 0.5f),
+            maxWordLength = prefs.getInt(KEY_CUSTOM_MAXLEN, 6)
+        )
+        val themeMode = runCatching {
+            ThemeMode.valueOf(prefs.getString(KEY_THEME_MODE, null) ?: "")
+        }.getOrNull() ?: ThemeMode.SYSTEM
+        val theme = runCatching {
+            GameThemePalette.valueOf(prefs.getString(KEY_THEME, null) ?: "")
+        }.getOrNull() ?: GameThemePalette.BOTANICAL_ZEN
+        val sound = prefs.getBoolean(KEY_SOUND, true)
+        val timed = prefs.getBoolean(KEY_TIMED, false)
+        val timedSecs = prefs.getInt(KEY_TIMED_SECS, 120)
+        GameAudioSynthesizer.isSoundEnabled = sound
+        _uiState.update {
+            it.copy(
+                difficulty = difficulty,
+                customSettings = custom,
+                themeMode = themeMode,
+                currentTheme = theme,
+                isSoundEnabled = sound,
+                isTimedModeEnabled = timed,
+                turnTimeLimitSeconds = timedSecs
+            )
+        }
+    }
+
+    private fun persistSettings() {
+        val ctx = settingsContext ?: return
+        val state = _uiState.value
+        ctx.getSharedPreferences(SETTINGS_PREFS, Context.MODE_PRIVATE).edit()
+            .putString(KEY_DIFFICULTY, state.difficulty.name)
+            .putFloat(KEY_CUSTOM_VOCAB, state.customSettings.vocabularyLevel)
+            .putFloat(KEY_CUSTOM_AGGR, state.customSettings.aggressiveness)
+            .putInt(KEY_CUSTOM_MAXLEN, state.customSettings.maxWordLength)
+            .putString(KEY_THEME_MODE, state.themeMode.name)
+            .putString(KEY_THEME, state.currentTheme.name)
+            .putBoolean(KEY_SOUND, state.isSoundEnabled)
+            .putBoolean(KEY_TIMED, state.isTimedModeEnabled)
+            .putInt(KEY_TIMED_SECS, state.turnTimeLimitSeconds)
+            .apply()
+    }
+
     fun toggleSoundEffects(enabled: Boolean) {
         GameAudioSynthesizer.isSoundEnabled = enabled
         _uiState.update { it.copy(isSoundEnabled = enabled) }
+        persistSettings()
     }
 
     fun toggleTimedMode(enabled: Boolean, timeLimitSeconds: Int = 120) {
@@ -1509,5 +1769,6 @@ class ScrabbleViewModel : ViewModel() {
         } else {
             stopTurnTimer()
         }
+        persistSettings()
     }
 }

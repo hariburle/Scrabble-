@@ -5,12 +5,9 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -92,6 +89,7 @@ fun ScrabbleBoardView(
     onOffsetChanged: (Offset) -> Unit = {},
     onCellPositioned: (row: Int, col: Int, bounds: androidx.compose.ui.geometry.Rect) -> Unit = { _, _, _ -> },
     hoveredCell: Pair<Int, Int>? = null,
+    draggedPendingTileId: String? = null,
     onPendingDragStart: (row: Int, col: Int, com.example.game.model.Tile, androidx.compose.ui.geometry.Offset) -> Unit = { _, _, _, _ -> },
     onPendingDrag: (androidx.compose.ui.geometry.Offset) -> Unit = {},
     onPendingDragEnd: () -> Unit = {}
@@ -113,20 +111,31 @@ fun ScrabbleBoardView(
         onOffsetChanged(offset)
     }
 
-    val infiniteTransition = rememberInfiniteTransition(label = "lastMoveGlow")
-    val glowAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.35f,
-        targetValue = 0.95f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(900),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "glowAlpha"
-    )
+    // The last-move highlight pulses briefly, then fades out completely.
+    // It used to pulse forever (infiniteTransition), then it held a steady
+    // glow — both read as the word staying "lit".
+    val glowAlphaAnim = remember { Animatable(0f) }
 
     val combinedHighlights = remember(lastMoveCells, wordSpanCells) {
         if (wordSpanCells.isNotEmpty()) wordSpanCells else lastMoveCells
     }
+
+    // Brief pulse whenever the highlighted word changes, then fade to
+    // nothing — no steady light left on the board.
+    LaunchedEffect(combinedHighlights) {
+        if (combinedHighlights.isNotEmpty()) {
+            glowAlphaAnim.snapTo(0.35f)
+            repeat(2) {
+                glowAlphaAnim.animateTo(0.95f, animationSpec = tween(900))
+                glowAlphaAnim.animateTo(0.35f, animationSpec = tween(900))
+            }
+            // Settle at full strength and STAY there until the next move:
+            // the just-played word must remain clearly highlighted against
+            // the board, not fade back to invisible.
+            glowAlphaAnim.animateTo(1f, animationSpec = tween(600))
+        }
+    }
+    val glowAlpha = glowAlphaAnim.value
 
     val hintPlacementsMap = remember(hintMove) {
         hintMove?.placements?.associate { (it.row to it.col) to it.tile } ?: emptyMap()
@@ -251,10 +260,24 @@ fun ScrabbleBoardView(
                                     cell = cell,
                                     tile = tile,
                                     isPending = pendingTile != null,
-                                    isHint = hintTile != null,
+                                    // Hint ghost ONLY when the displayed tile
+                                    // actually IS the hint tile. Previously
+                                    // any hint-covered cell rendered as a
+                                    // ghost even when it held a real
+                                    // committed tile — so after accepting a
+                                    // word, committed tiles on hint cells
+                                    // turned translucent ("became light").
+                                    isHint = hintTile != null && pendingTile == null && cell.tile == null,
                                     isSelected = isSelected,
                                     isLastMove = isLastMove,
                                     isHovered = hoveredCell == (r to c),
+                                    // Null-safe: pendingTile?.id is null for
+                                    // committed tiles, and draggedPendingTileId
+                                    // is null when no drag is active, so the
+                                    // old `pendingTile?.id == draggedPendingTileId`
+                                    // was true (null == null) for EVERY committed
+                                    // tile — ghosting them all to 0.2 alpha.
+                                    isBeingDragged = pendingTile != null && pendingTile.id == draggedPendingTileId,
                                     glowAlpha = glowAlpha,
                                     palette = palette,
                                     cellSize = cellSize,
@@ -342,6 +365,7 @@ fun BoardCellView(
     isSelected: Boolean,
     isLastMove: Boolean,
     isHovered: Boolean = false,
+    isBeingDragged: Boolean = false,
     glowAlpha: Float,
     palette: GameThemePalette,
     cellSize: Dp,
@@ -371,10 +395,12 @@ fun BoardCellView(
         Modifier.pointerInput(tile.id) {
             var totalDragOffset = Offset.Zero
             var isGloballyDragging = false
+            var touchOffset = Offset.Zero
             detectDragGestures(
                 onDragStart = { offset ->
                     totalDragOffset = Offset.Zero
                     isGloballyDragging = false
+                    touchOffset = offset
                 },
                 onDragEnd = {
                     if (isGloballyDragging) {
@@ -392,7 +418,12 @@ fun BoardCellView(
                     if (!isGloballyDragging) {
                         if (totalDragOffset.getDistance() > 15f) {
                             isGloballyDragging = true
-                            onDragStart(totalDragOffset)
+                            // Anchor = exact finger position at activation: the
+                            // grab point within the cell + the distance moved
+                            // since touch-down. (Passing only the distance, as
+                            // before, made the floating tile jump away from
+                            // the finger the moment the drag started.)
+                            onDragStart(touchOffset + totalDragOffset)
                         }
                     } else {
                         onDrag(dragAmount)
@@ -417,7 +448,7 @@ fun BoardCellView(
                 width = if (isHovered) 2.5.dp else if (isSelected) 2.dp else if (isLastMove) 1.5.dp else 0.5.dp,
                 color = if (isHovered) Color(0xFFFFD54F)
                 else if (isSelected) palette.secondaryColor
-                else if (isLastMove) palette.secondaryColor.copy(alpha = glowAlpha)
+                else if (isLastMove) Color(0xFFE65100).copy(alpha = glowAlpha)
                 else palette.tileBorder.copy(alpha = 0.25f),
                 shape = RoundedCornerShape(2.5.dp)
             )
@@ -438,16 +469,24 @@ fun BoardCellView(
             )
         }
         if (tile != null) {
-            ScrabbleTileView(
-                tile = tile,
-                palette = palette,
-                size = cellSize - 1.5.dp,
-                isSelected = isSelected,
-                isPending = isPending,
-                isHint = isHint,
-                isLastMove = isLastMove,
-                onBoard = true
-            )
+            // The tile being dragged fades in its cell (same 0.2 ghost as
+            // tray drags) so the floating tile is the only full-strength one.
+            Box(
+                modifier = Modifier.graphicsLayer {
+                    alpha = if (isBeingDragged) 0.2f else 1f
+                }
+            ) {
+                ScrabbleTileView(
+                    tile = tile,
+                    palette = palette,
+                    size = cellSize - 1.5.dp,
+                    isSelected = isSelected,
+                    isPending = isPending,
+                    isHint = isHint,
+                    isLastMove = isLastMove,
+                    onBoard = true
+                )
+            }
         } else {
             // Display multiplier text with gentle, muted contrast that never overpowers the board
             if (cell.bonusType != BonusType.NONE) {

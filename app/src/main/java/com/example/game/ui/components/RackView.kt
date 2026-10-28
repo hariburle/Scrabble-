@@ -47,6 +47,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
@@ -98,6 +99,8 @@ fun PlayerRackView(
     onSwap: () -> Unit,
     onPlayMove: () -> Unit,
     onHint: () -> Unit,
+    hintShown: Boolean = false,
+    onAcceptHint: () -> Unit = {},
     onPass: () -> Unit,
     modifier: Modifier = Modifier,
     onRearrange: (fromIndex: Int, toIndex: Int) -> Unit = { _, _ -> },
@@ -365,6 +368,8 @@ fun PlayerRackView(
             onRecall = onRecall,
             onSwap = onSwap,
             onHint = onHint,
+            hintShown = hintShown,
+            onAcceptHint = onAcceptHint,
             onPlayMove = onPlayMove,
             onPass = onPass,
             isSnapModeActive = isSnapModeActive,
@@ -578,9 +583,30 @@ fun RackTileTray(
     var touchStartInRoot by remember { mutableStateOf(Offset.Zero) }
     var cumulativeDrag by remember { mutableStateOf(Offset.Zero) }
     var initialSlotIndex by remember { mutableIntStateOf(-1) }
-    var currentSlotIndex by remember { mutableIntStateOf(-1) }
+    // Drop target previewed during the drag. The rack list itself is NOT
+    // mutated mid-gesture (see below); the reorder commits once, on drop.
+    var targetSlotIndex by remember { mutableIntStateOf(-1) }
     var isDraggingGlobally by remember { mutableStateOf(false) }
     val tilePositions = remember { Array(7) { Offset.Zero } }
+
+    // A drag interrupted mid-gesture (e.g. the turn timer forcing a pass,
+    // which flips isPlayerTurn and restarts the pointer input) used to strand
+    // the drag state: the tile stayed displaced over its neighbour and every
+    // tray tap stayed dead, because taps are ignored while draggedTileId is
+    // set. Resetting here makes that impossible.
+    LaunchedEffect(isPlayerTurn, isSnapModeActive) {
+        if (!isPlayerTurn || isSnapModeActive) {
+            if (draggedTileId != null) {
+                currentOnDragStateChanged(false)
+            }
+            draggedTileId = null
+            touchStartInRoot = Offset.Zero
+            cumulativeDrag = Offset.Zero
+            initialSlotIndex = -1
+            targetSlotIndex = -1
+            isDraggingGlobally = false
+        }
+    }
 
     val configuration = androidx.compose.ui.platform.LocalConfiguration.current
     val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
@@ -631,14 +657,29 @@ fun RackTileTray(
                             val index = i
                             val isBeingDragged = (draggedTileId == tile.id)
                             val isCurrentGloballyDragged = isDraggingGlobally && isBeingDragged
-                            val displayOffset = if (isBeingDragged && !isDraggingGlobally && initialSlotIndex != -1 && currentSlotIndex != -1) {
-                                cumulativeDrag.x - (currentSlotIndex - initialSlotIndex) * slotDistance
+                            // The list is never mutated mid-gesture, so tiles never
+                            // jump slots while the finger is down. The dragged tile
+                            // simply follows the finger, and the tiles between the
+                            // origin slot and the drop target shift one slot to open
+                            // the gap. The reorder commits once, on drop.
+                            val dragOffset = if (isBeingDragged && !isDraggingGlobally && initialSlotIndex != -1) {
+                                cumulativeDrag.x
                             } else {
                                 0f
                             }
+                            val shiftOffset = if (!isBeingDragged && draggedTileId != null && !isDraggingGlobally && initialSlotIndex != -1 && targetSlotIndex != -1) {
+                                when {
+                                    targetSlotIndex > initialSlotIndex && index in (initialSlotIndex + 1)..targetSlotIndex -> -slotDistance
+                                    targetSlotIndex < initialSlotIndex && index in targetSlotIndex until initialSlotIndex -> slotDistance
+                                    else -> 0f
+                                }
+                            } else {
+                                0f
+                            }
+                            val displayOffset = dragOffset + shiftOffset
                             val snapOrderIndex = if (isSnapModeActive) snapWordTray.indexOfFirst { it.id == tile.id } else -1
                             val isSnapSelected = snapOrderIndex != -1
-                            val isTrayWordTile = trayWordInfo != null && selectedTileIndex == null && !isSnapModeActive && index in trayWordInfo.startIndex..trayWordInfo.endIndex
+                            val isTrayWordTile = trayWordInfo != null && (selectedTileIndex == null || isSnapModeActive) && index in trayWordInfo.startIndex..trayWordInfo.endIndex
 
                             Box(
                                 modifier = Modifier
@@ -664,7 +705,7 @@ fun RackTileTray(
                                                     val startIdx = if (currentIdx != -1) currentIdx else index
                                                     draggedTileId = tile.id
                                                     initialSlotIndex = startIdx
-                                                    currentSlotIndex = startIdx
+                                                    targetSlotIndex = startIdx
                                                     val slotRootPos = tilePositions.getOrElse(startIdx) { Offset.Zero }
                                                     touchStartInRoot = slotRootPos + localOffset
                                                     cumulativeDrag = Offset.Zero
@@ -676,11 +717,17 @@ fun RackTileTray(
                                                 if (isDraggingGlobally) {
                                                     currentOnDragEnd()
                                                 } else if (draggedTileId != null) {
+                                                    // Commit the reorder exactly once, now that the
+                                                    // gesture is over. The list was untouched during
+                                                    // the drag, so tiles never jump mid-gesture.
+                                                    if (targetSlotIndex != -1 && targetSlotIndex != initialSlotIndex) {
+                                                        currentOnRearrange(initialSlotIndex, targetSlotIndex)
+                                                    }
                                                     currentOnRearrangeFinished()
                                                 }
                                                 draggedTileId = null
                                                 initialSlotIndex = -1
-                                                currentSlotIndex = -1
+                                                targetSlotIndex = -1
                                                 cumulativeDrag = Offset.Zero
                                                 touchStartInRoot = Offset.Zero
                                                 isDraggingGlobally = false
@@ -690,11 +737,13 @@ fun RackTileTray(
                                                 if (isDraggingGlobally) {
                                                     currentOnDragEnd()
                                                 } else if (draggedTileId != null) {
+                                                    // Cancelled: revert. Nothing was committed, since
+                                                    // the list is untouched until a clean drop.
                                                     currentOnRearrangeFinished()
                                                 }
                                                 draggedTileId = null
                                                 initialSlotIndex = -1
-                                                currentSlotIndex = -1
+                                                targetSlotIndex = -1
                                                 cumulativeDrag = Offset.Zero
                                                 touchStartInRoot = Offset.Zero
                                                 isDraggingGlobally = false
@@ -716,12 +765,15 @@ fun RackTileTray(
                                                         if (isDraggingOffTray) {
                                                             isDraggingGlobally = true
                                                             val currentTouchPoint = touchStartInRoot + cumulativeDrag
-                                                            currentOnDragStart(currentSlotIndex, tile, currentTouchPoint)
+                                                            // The list is untouched during the drag, so the
+                                                            // tile's slot is still its origin slot.
+                                                            currentOnDragStart(initialSlotIndex, tile, currentTouchPoint)
                                                         } else {
+                                                            // Preview only: update the drop target, do not
+                                                            // touch the list until the gesture ends.
                                                             val targetSlot = (initialSlotIndex + slotShift).coerceIn(0, currentRack.lastIndex)
-                                                            if (targetSlot != currentSlotIndex && targetSlot in currentRack.indices) {
-                                                                currentOnRearrange(currentSlotIndex, targetSlot)
-                                                                currentSlotIndex = targetSlot
+                                                            if (targetSlot in currentRack.indices) {
+                                                                targetSlotIndex = targetSlot
                                                             }
                                                         }
                                                     } else {
@@ -794,6 +846,8 @@ fun RackActionButtons(
     onRecall: () -> Unit,
     onSwap: () -> Unit,
     onHint: () -> Unit,
+    hintShown: Boolean = false,
+    onAcceptHint: () -> Unit = {},
     onPlayMove: () -> Unit,
     onPass: () -> Unit,
     modifier: Modifier = Modifier,
@@ -992,15 +1046,19 @@ fun RackActionButtons(
                 }
             }
 
-            // Hint Button
+            // Hint Button — while a hint is shown it becomes the
+            // one-tap way to accept it (stages the hint's tiles; PLAY
+            // still commits). Otherwise it requests a new hint.
             Box(
                 modifier = Modifier.weight(1f),
                 contentAlignment = Alignment.Center
             ) {
                 val isHintEnabled = isPlayerTurn && !hasPendingPlacements && hintsLeft > 0
+                val showAcceptHint = hintShown && isPlayerTurn
+                val isHintButtonActive = showAcceptHint || isHintEnabled
                 OutlinedButton(
-                    onClick = onHint,
-                    enabled = isHintEnabled,
+                    onClick = if (showAcceptHint) onAcceptHint else onHint,
+                    enabled = isHintButtonActive,
                     colors = ButtonDefaults.outlinedButtonColors(
                         contentColor = Color(0xFFE65100),
                         disabledContentColor = Color(0xFFE65100).copy(alpha = 0.35f)
@@ -1008,7 +1066,7 @@ fun RackActionButtons(
                     shape = RoundedCornerShape(24.dp),
                     border = androidx.compose.foundation.BorderStroke(
                         width = 1.dp,
-                        color = if (isHintEnabled) Color(0xFFE65100).copy(alpha = 0.6f) else palette.tileBorder.copy(alpha = 0.25f)
+                        color = if (isHintButtonActive) Color(0xFFE65100).copy(alpha = 0.6f) else palette.tileBorder.copy(alpha = 0.25f)
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1022,12 +1080,12 @@ fun RackActionButtons(
                         Icon(
                             painter = painterResource(R.drawable.ic_lightbulb),
                             contentDescription = null,
-                            tint = if (isHintEnabled) Color(0xFFE65100) else Color(0xFFE65100).copy(alpha = 0.35f),
+                            tint = if (isHintButtonActive) Color(0xFFE65100) else Color(0xFFE65100).copy(alpha = 0.35f),
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "Hint",
+                            text = if (showAcceptHint) "Use Hint" else "Hint",
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold
                         )

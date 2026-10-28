@@ -1,5 +1,6 @@
 package com.example.game.dictionary
 
+import android.content.Context
 import java.io.BufferedReader
 import java.io.InputStream
 import java.io.InputStreamReader
@@ -21,12 +22,24 @@ object WordDictionary {
     var isInitialized = false
         private set
 
-    fun init() {
-        if (isInitialized) return
+    @Volatile
+    var isFullLexiconLoaded = false
+        private set
+
+    /**
+     * Loads the dictionary. Without a Context (plain JVM / tests) only the
+     * classloader word list and the hardcoded fallback load. With a Context
+     * (Android) the full bundled list is loaded from assets first — that is
+     * the list the game actually validates against on device. Safe to call
+     * more than once: a later call with a Context upgrades a fallback-only
+     * load to the full list.
+     */
+    fun init(context: Context? = null) {
+        if (isInitialized && (context == null || isFullLexiconLoaded)) return
         synchronized(this) {
-            if (isInitialized) return
+            if (isInitialized && (context == null || isFullLexiconLoaded)) return
             loadDefinitions()
-            loadLexicon()
+            loadLexicon(context)
             isInitialized = true
         }
     }
@@ -62,10 +75,15 @@ object WordDictionary {
         return false
     }
 
-    fun getDefinition(word: String): String {
+    /**
+     * A real, built-in meaning for [word], or null when the built-in
+     * dictionary has nothing (direct match or morphological derivation).
+     * Callers use this to decide whether an online lookup is worthwhile.
+     */
+    fun getLocalDefinition(word: String): String? {
         if (!isInitialized) init()
         val clean = word.trim().uppercase()
-        if (clean.isEmpty()) return "No word provided."
+        if (clean.isEmpty()) return null
 
         // Direct dictionary match
         definitions[clean]?.let { return it }
@@ -131,6 +149,15 @@ object WordDictionary {
             definitions[base]?.let { return "Not or reversal of $base: $it" }
         }
 
+        return null
+    }
+
+    fun getDefinition(word: String): String {
+        if (!isInitialized) init()
+        val clean = word.trim().uppercase()
+        if (clean.isEmpty()) return "No word provided."
+        getLocalDefinition(word)?.let { return it }
+
         // Calculate raw Scrabble points for lexical entry
         var rawPts = 0
         for (ch in clean) {
@@ -158,35 +185,61 @@ object WordDictionary {
         return "$n syllable" + if (n > 1) "s" else ""
     }
 
-    private fun loadLexicon() {
+    private fun loadFromStream(stream: InputStream): Int {
         var loadedCount = 0
-        try {
-            val stream: InputStream? =
-                WordDictionary::class.java.getResourceAsStream("/scrabble_words.txt.gz")
-                    ?: WordDictionary::class.java.classLoader?.getResourceAsStream("scrabble_words.txt.gz")
-                    ?: Thread.currentThread().contextClassLoader?.getResourceAsStream("scrabble_words.txt.gz")
-                    ?: ClassLoader.getSystemResourceAsStream("scrabble_words.txt.gz")
-                    ?: WordDictionary::class.java.getResourceAsStream("/assets/scrabble_words.txt.gz")
-
-            if (stream != null) {
-                GZIPInputStream(stream).use { gzIn ->
-                    BufferedReader(InputStreamReader(gzIn, Charsets.UTF_8)).use { reader ->
-                        var line = reader.readLine()
-                        while (line != null) {
-                            val w = line.trim().uppercase()
-                            if (w.length >= 2 && w.all { it in 'A'..'Z' }) {
-                                if (wordSet.add(w)) {
-                                    allWordsList.add(w)
-                                    loadedCount++
-                                }
-                            }
-                            line = reader.readLine()
+        GZIPInputStream(stream).use { gzIn ->
+            BufferedReader(InputStreamReader(gzIn, Charsets.UTF_8)).use { reader ->
+                var line = reader.readLine()
+                while (line != null) {
+                    val w = line.trim().uppercase()
+                    if (w.length >= 2 && w.all { it in 'A'..'Z' }) {
+                        if (wordSet.add(w)) {
+                            allWordsList.add(w)
+                            loadedCount++
                         }
                     }
+                    line = reader.readLine()
                 }
             }
-        } catch (_: Exception) {
-            // Fallback continues below
+        }
+        return loadedCount
+    }
+
+    private fun loadLexicon(context: Context? = null) {
+        var loadedCount = 0
+
+        // Android: the full bundled list ships as an asset. (The old
+        // src/main/resources copy never reaches the APK, so the classloader
+        // lookup below silently finds nothing on device.)
+        if (context != null) {
+            try {
+                context.assets.open("scrabble_words.txt.gz").use { stream ->
+                    loadedCount += loadFromStream(stream)
+                }
+            } catch (_: Exception) {
+                // Fall through to the classloader attempt below
+            }
+        }
+
+        if (loadedCount == 0) {
+            try {
+                val stream: InputStream? =
+                    WordDictionary::class.java.getResourceAsStream("/scrabble_words.txt.gz")
+                        ?: WordDictionary::class.java.classLoader?.getResourceAsStream("scrabble_words.txt.gz")
+                        ?: Thread.currentThread().contextClassLoader?.getResourceAsStream("scrabble_words.txt.gz")
+                        ?: ClassLoader.getSystemResourceAsStream("scrabble_words.txt.gz")
+                        ?: WordDictionary::class.java.getResourceAsStream("/assets/scrabble_words.txt.gz")
+
+                if (stream != null) {
+                    stream.use { loadedCount += loadFromStream(it) }
+                }
+            } catch (_: Exception) {
+                // Fallback continues below
+            }
+        }
+
+        if (loadedCount > 0) {
+            isFullLexiconLoaded = true
         }
 
         // Always ensure core vocabulary is inserted

@@ -49,8 +49,6 @@ fun ScrabbleTileView(
     onBoard: Boolean = false,
     onClick: (() -> Unit)? = null
 ) {
-    val isCommittedBoardTile = onBoard && !isPending && !isHint
-
     val scale by animateFloatAsState(
         targetValue = if (isSelected) 1.08f else if (isTrayWordTile) 1.04f else if (isLastMove) 1.04f else 1.0f,
         animationSpec = spring(dampingRatio = 0.65f, stiffness = 380f),
@@ -71,10 +69,17 @@ fun ScrabbleTileView(
                             palette.tileColor.copy(alpha = 0.45f),
                             palette.tileColor.copy(alpha = 0.3f)
                         )
-                    } else if (isCommittedBoardTile) {
+                    } else if (onBoard) {
+                        // Physical-Scrabble pale cream, identical in every
+                        // theme: bright against dark boards, warm and
+                        // distinct against light boards, with black letters
+                        // and a dark brown frame. (The v6 drag-ghost fix
+                        // means this color now actually reaches the screen;
+                        // earlier cream/gold attempts were masked by the
+                        // 0.2-alpha ghosting of committed tiles.)
                         listOf(
-                            Color(0xFFFFE082), // High-visibility bright warm amber top
-                            Color(0xFFFFB300)  // Deep rich amber bottom for contrast
+                            Color(0xFFFFFBEA),
+                            Color(0xFFF5DFA0)
                         )
                     } else if (isPending) {
                         listOf(
@@ -106,13 +111,13 @@ fun ScrabbleTileView(
                 shape = RoundedCornerShape(6.dp)
             )
             .border(
-                width = if (isSelected) 2.5.dp else if (isTrayWordTile) 2.dp else if (isPending) 1.5.dp else if (isLastMove) 2.dp else if (isHint) 1.5.dp else 1.dp,
+                width = if (isSelected) 2.5.dp else if (isTrayWordTile) 2.dp else if (isPending) 1.5.dp else if (isLastMove) 2.dp else if (isHint) 1.5.dp else if (onBoard) 1.5.dp else 1.dp,
                 color = if (isSelected) palette.secondaryColor 
                         else if (isTrayWordTile) Color(0xFFFFB300) // Golden amber glow for tray word
                         else if (isPending) palette.primaryColor 
                         else if (isLastMove) Color(0xFFE65100) 
                         else if (isHint) Color(0xFFFFB300).copy(alpha = 0.8f)
-                        else if (isCommittedBoardTile) Color(0xFF795548) // Chocolate border for coin contrast
+                        else if (onBoard) Color(0xFF4E342E) // Dark brown frame for the cream tile
                         else palette.tileBorder,
                 shape = RoundedCornerShape(6.dp)
             )
@@ -128,9 +133,9 @@ fun ScrabbleTileView(
         // Main Letter
         Text(
             text = if (letterChar == ' ') "" else letterChar.toString(),
-            color = if (isCommittedBoardTile) Color(0xFF3E2723) // Deep rich chocolate for ultra-contrast readability
-                    else if (isHint) palette.tileTextColor.copy(alpha = 0.65f)
-                    else if (isBlankAssigned) palette.primaryColor 
+            color = if (isHint) palette.tileTextColor.copy(alpha = 0.65f)
+                    else if (isBlankAssigned && isPending) palette.primaryColor
+                    else if (onBoard) Color.Black // Physical tiles: black letters on cream
                     else palette.tileTextColor,
             fontSize = (size.value * 0.52f).sp,
             fontWeight = FontWeight.Bold,
@@ -143,8 +148,8 @@ fun ScrabbleTileView(
         if (tile.points > 0 || isBlankAssigned) {
             Text(
                 text = if (tile.isBlank) "★" else tile.points.toString(),
-                color = if (isCommittedBoardTile) Color(0xFF5D4037)
-                        else if (isHint) palette.tileTextColor.copy(alpha = 0.5f)
+                color = if (isHint) palette.tileTextColor.copy(alpha = 0.5f)
+                        else if (onBoard) Color.Black
                         else if (tile.isBlank) palette.secondaryColor 
                         else palette.tileTextColor.copy(alpha = 0.75f),
                 fontSize = (size.value * 0.24f).sp,
